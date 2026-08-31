@@ -10,7 +10,7 @@ chrome.storage.local.get(ids, values => {
 });
 
 document.getElementById("save").addEventListener("click", async () => {
-  const values = { apiUrl: fields.apiUrl.value.trim().replace(/\/$/, ""), apiKey: fields.apiKey.value, workerId: fields.workerId.value.trim(), enabled: fields.enabled.checked, lastError: "" };
+  const values = { apiUrl: fields.apiUrl.value.trim().replace(/\/$/, ""), apiKey: fields.apiKey.value, workerId: fields.workerId.value.trim(), enabled: fields.enabled.checked, lastError: "", blockedLanes: {} };
   await chrome.storage.local.set(values);
   chrome.runtime.sendMessage({ type: "POLL_NOW" });
   status.textContent = "Đã lưu. Worker đang kiểm tra queue.";

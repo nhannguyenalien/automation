@@ -1,11 +1,25 @@
-const defaults = { apiUrl: "http://127.0.0.1:8787", apiKey: "", workerId: `chrome-${crypto.randomUUID().slice(0, 8)}`, enabled: false };
+import { runtimeDefaults } from "./runtime-config.js";
+
+const defaults = {
+  apiUrl: runtimeDefaults.apiUrl || "http://127.0.0.1:8787",
+  apiKey: runtimeDefaults.apiKey || "",
+  workerId: runtimeDefaults.workerId || `chrome-${crypto.randomUUID().slice(0, 8)}`,
+  enabled: runtimeDefaults.enabled ?? false
+};
 const busyLanes = { chat: false, image: false, video: false };
 let flowTabLock = Promise.resolve();
 
+function isSystemicWorkerError(lane, message) {
+  if (lane !== "image") return false;
+  return /(?:ảnh viewer khớp (?:thẻ kết quả|ứng viên)|thẻ (?:kết quả mới đã biến mất|ảnh ứng viên)|thư viện ảnh Flow chưa ổn định|không tìm thấy.*(?:nút cấu hình|trình tạo|ô prompt Flow|ảnh kết quả mới))/i.test(String(message || ""));
+}
+
 async function config() {
   const saved = await chrome.storage.local.get(Object.keys(defaults));
-  const merged = { ...defaults, ...saved };
-  if (!saved.workerId) await chrome.storage.local.set({ workerId: merged.workerId });
+  const merged = runtimeDefaults.force ? { ...saved, ...defaults } : { ...defaults, ...saved };
+  const missing = Object.fromEntries(Object.entries(defaults).filter(([key]) => saved[key] === undefined));
+  const updates = runtimeDefaults.force ? defaults : missing;
+  if (Object.keys(updates).length) await chrome.storage.local.set(updates);
   return merged;
 }
 
@@ -56,6 +70,7 @@ async function flowTab(projectUrl, type) {
     throw new Error(`projectUrl phải là URL project Flow, hiện nhận được: ${projectUrl}`);
   }
   const requestedPath = requested.origin + requested.pathname;
+  const projectPath = requested.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
   const ownKey = type === "video" ? "flowVideoTabId" : "flowImageTabId";
   const otherKey = type === "video" ? "flowImageTabId" : "flowVideoTabId";
 
@@ -68,11 +83,12 @@ async function flowTab(projectUrl, type) {
   let tab;
   try {
     const saved = await chrome.storage.local.get([ownKey, otherKey]);
-    const isRequestedTab = candidate => {
+    const isRequestedProject = candidate => {
       if (!candidate?.url) return false;
       try {
         const current = new URL(candidate.url);
-        return current.origin + current.pathname === requestedPath;
+        return current.origin === requested.origin &&
+          (current.pathname === projectPath || current.pathname.startsWith(`${projectPath}/`));
       } catch {
         return false;
       }
@@ -80,13 +96,15 @@ async function flowTab(projectUrl, type) {
     const savedTab = saved[ownKey]
       ? await chrome.tabs.get(saved[ownKey]).catch(() => null)
       : null;
-    if (isRequestedTab(savedTab)) {
-      tab = await chrome.tabs.update(savedTab.id, { active: true });
+    if (isRequestedProject(savedTab)) {
+      // A completed inspection leaves the SPA at /edit/<asset>. Always return
+      // the lane's one dedicated tab to the gallery before starting a job.
+      tab = await chrome.tabs.update(savedTab.id, { url: projectUrl, active: true });
     } else {
       const tabs = await chrome.tabs.query({ url: "https://labs.google/fx/*" });
-      const exactUnused = tabs.find(candidate => isRequestedTab(candidate) && candidate.id !== saved[otherKey]);
-      if (exactUnused) {
-        tab = await chrome.tabs.update(exactUnused.id, { active: true });
+      const projectUnused = tabs.find(candidate => isRequestedProject(candidate) && candidate.id !== saved[otherKey]);
+      if (projectUnused) {
+        tab = await chrome.tabs.update(projectUnused.id, { url: projectUrl, active: true });
       } else {
         // Do not navigate a tab assigned to the other media type. A dedicated
         // second project tab preserves each sidebar section between jobs.
@@ -153,6 +171,29 @@ async function waitReady(tabId, timeout = 60000) {
   throw new Error("Tab Flow chưa sẵn sàng hoặc chưa đăng nhập");
 }
 
+async function inspectImageCandidate(message) {
+  let viewerTab;
+  try {
+    viewerTab = await chrome.tabs.create({ url: message.url, active: true });
+    const started = Date.now();
+    while (Date.now() - started < 60000) {
+      const current = await chrome.tabs.get(viewerTab.id);
+      if (current.status === "complete") break;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    await ensureReady(viewerTab.id);
+    return await chrome.tabs.sendMessage(viewerTab.id, {
+      type: "INSPECT_IMAGE_CANDIDATE",
+      prompt: message.prompt,
+      jobId: message.jobId,
+      index: message.index,
+      output: message.output
+    });
+  } finally {
+    if (viewerTab?.id) await chrome.tabs.remove(viewerTab.id).catch(() => {});
+  }
+}
+
 async function ensureReady(tabId) {
   try {
     await waitReady(tabId, 15000);
@@ -174,6 +215,8 @@ async function poll(lane) {
   try {
     const cfg = await config();
     if (!cfg.enabled || !cfg.apiKey) return;
+    const { blockedLanes = {} } = await chrome.storage.local.get("blockedLanes");
+    if (blockedLanes[lane]) return;
     const types = [lane];
     ({ task } = await api("/extension/claim", { workerId: `${cfg.workerId}-${lane}`, types }));
     if (!task) return;
@@ -183,12 +226,22 @@ async function poll(lane) {
       : await flowTab(task.projectUrl, task.type);
     await ensureReady(tab.id);
     const result = await chrome.tabs.sendMessage(tab.id, { type: task.type === "chat" ? "CHAT" : "GENERATE", task });
+    if (!result?.ok) throw new Error(result?.error || "Content script xử lý thất bại");
     await api("/extension/result", { jobId: task.jobId, index: task.index, ...result });
   } catch (error) {
     if (task) {
       await api("/extension/result", { jobId: task.jobId, index: task.index, ok: false, error: error.message }).catch(() => {});
     }
-    await chrome.storage.local.set({ lastError: error.message, lastRun: new Date().toISOString() });
+    const updates = { lastError: error.message, lastRun: new Date().toISOString() };
+    if (isSystemicWorkerError(lane, error.message)) {
+      const { blockedLanes = {} } = await chrome.storage.local.get("blockedLanes");
+      updates.blockedLanes = {
+        ...blockedLanes,
+        [lane]: { at: new Date().toISOString(), error: error.message }
+      };
+      updates.lastError = `Đã dừng lane ${lane} để bảo vệ batch: ${error.message}`;
+    }
+    await chrome.storage.local.set(updates);
   } finally {
     busyLanes[lane] = false;
   }
@@ -209,6 +262,12 @@ pollAll();
 chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === "poll") pollAll(); });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "POLL_NOW") pollAll();
+  if (message.type === "INSPECT_IMAGE_URL") {
+    inspectImageCandidate(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message.type === "UPLOAD_MEDIA_BYTES") {
     (async () => {
       if (!message.base64) throw new Error("Video output rỗng");

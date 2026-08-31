@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Google AI Browser Worker",
-  "version": "0.3.9",
+  "version": "0.3.12",
   "description": "Nhận job API và điều khiển Google Flow hoặc Gemini trong phiên Chrome đang đăng nhập.",
   "permissions": ["storage", "tabs", "downloads", "alarms", "debugger"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*",
+    "http://backend/*",
     "https://*/*",
     "https://labs.google/*",
     "https://gemini.google.com/*",

@@ -100,8 +100,8 @@ Các request chờ được quản lý bằng waiter theo `jobId`. `saveJob` đ�
 2. Extension claim prompt chưa xử lý đầu tiên.
 3. Extension mở đúng project URL.
 4. Content script chọn ratio và x1–x4 theo `outputs`, nhập prompt rồi bấm Generate.
-5. Script đợi gallery ổn định và thu đủ số ảnh mới.
-6. Worker lần lượt tải các ảnh về `Downloads/flow-images`.
+5. Script đợi gallery ổn định và thu các asset ID mới (card thư viện Flow không chứa prompt).
+6. Worker mở từng asset trong viewer, chỉ nhận khi prompt đầy đủ trong viewer khớp chính xác prompt của job, rồi tải ảnh về `Downloads/flow-images`. Asset sai prompt bị bỏ qua.
 7. Extension gửi từng binary về API; API upload S3, lưu các public URL rồi tăng progress theo prompt hoặc hoàn tất job.
 
 `progress` đếm prompt, còn `images[]` chứa tất cả output đã làm phẳng theo thứ tự prompt rồi output. Một job có 3 prompt và `outputs: 4` có tối đa 12 ảnh.
@@ -135,7 +135,7 @@ Batch chat chạy tuần tự trong cùng tab. Luồng tiếp tục conversation
 ## Queue và concurrency
 
 - Extension có ba lane độc lập với cờ `busy`: Chat, Image và Video. Mỗi lane chỉ xử lý một prompt tại một thời điểm; ba lane có thể chạy song song trên ba tab riêng.
-- Image và Video không bao giờ dùng chung một tab Flow. Worker lưu riêng `flowImageTabId`/`flowVideoTabId`, tự tạo tab thứ hai khi cần và bấm **Hình ảnh** hoặc **Video** trực tiếp ở sidebar trước khi thao tác composer.
+- Image và Video không bao giờ dùng chung một tab Flow. Worker lưu riêng `flowImageTabId`/`flowVideoTabId`, tự tạo tab thứ hai khi cần và bấm **Hình ảnh** hoặc **Video** ở sidebar. Do sidebar chỉ lọc thư viện, content script còn xác nhận loại composer trong popup và tự sửa khi tab mới hoặc vừa bị reset.
 - Queue được lưu bền vững trong Turso. Mỗi job chỉ cấp một lease tại một thời điểm nên các prompt trong cùng job luôn đi tuần tự trên tab của lane tương ứng.
 - Một image job nhận tối đa 100 prompt/100 ảnh theo mặc định. `FLOW_IMAGE_BATCH_SIZE=10` chia nhóm tiến độ; nó không mở 10 tác vụ Flow đồng thời.
 - API hỗ trợ retry có giới hạn; riêng ảnh mặc định không retry để tránh tạo trùng sau khi Flow đã nhận thao tác Generate.

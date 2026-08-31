@@ -695,6 +695,7 @@ const server = http.createServer(async (req, res) => {
         return send(res, 200, {
           task: {
             type: job.type || "image", jobId: job.id, index, prompt: job.prompts[index],
+            attempt: job.attempts?.[index] || 1,
             ratio: job.ratio, outputs: job.outputs || 1,
             projectUrl: job.projectUrl, referenceImageUrl: job.referenceImageUrl,
             chatUrl: job.chatUrl, newConversation: job.newConversation, model: job.model,

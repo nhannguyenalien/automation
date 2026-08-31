@@ -28,7 +28,7 @@ Không đóng terminal này khi test local.
 3. Mở popup extension và kiểm tra API URL/key.
 4. Bật worker và bấm lưu.
 5. Giữ hai tab Flow cùng project và một tab `https://gemini.google.com/app` mở.
-6. Xác nhận cả Flow và Gemini đều đã đăng nhập trong cùng Chrome profile. Extension gán riêng tab **Flow Image** và **Flow Video**, rồi bấm mục tương ứng ở sidebar; không đổi Hình ảnh/Video trong popup cấu hình.
+6. Xác nhận cả Flow và Gemini đều đã đăng nhập trong cùng Chrome profile. Extension gán riêng tab **Flow Image** và **Flow Video**, bấm mục tương ứng ở sidebar, rồi kiểm tra loại trình tạo trong popup cấu hình. Sidebar chỉ lọc thư viện; với tab mới hoặc vừa bị reset, extension sẽ chọn **Hình ảnh**/**Video** trong popup đúng một lần và giữ nguyên cho các job sau.
 
 ## Smoke test sau khi khởi động
 
@@ -219,6 +219,21 @@ Job ID sai hoặc API đã restart. Job extension chỉ nằm trong RAM.
 2. Kiểm tra Chrome Settings → Downloads.
 3. Tắt tùy chọn hỏi vị trí lưu từng file; extension dùng `saveAs: false` nhưng policy/profile vẫn có thể tác động.
 4. Tìm trong `~/Downloads/flow-images`.
+
+### Job completed nhưng ảnh sai prompt hoặc có watermark Veo
+
+Đây là lỗi tương quan kết quả, không phải lỗi queue/job ID. Worker hiện áp dụng cơ chế fail-safe:
+
+- chờ thư viện ảnh ổn định trước khi bấm Tạo;
+- chuẩn hóa chữ hoa/thường và khoảng trắng, sau đó so khớp toàn bộ prompt khách gửi với text trong chính card kết quả;
+- chỉ nhận card có cả URL card và nguồn thumbnail mới xuất hiện sau lúc submit;
+- loại card/video thumbnail có dấu hiệu Veo, Video hoặc Play;
+- card trong thư viện không có prompt nên extension không so khớp tại gallery; nó thu asset ID mới, mở từng card và so prompt đầy đủ ngay trong viewer;
+- chỉ tải ảnh lớn khi prompt viewer khớp chính xác prompt job; card cũ/sai prompt (kể cả Veo) bị bỏ qua, hết candidate mới fail thay vì trả ảnh sai nhưng báo `completed`.
+
+Sau khi cập nhật `flow-extension/flow.js`, mở `chrome://extensions`, bấm **Reload** cho extension và reload tab Flow. Chạy đúng một image smoke test với prompt dễ nhận biết trước. Chỉ chạy batch khi URL trả về đúng prompt và không có watermark Veo. Console tab Flow sẽ có log `selected correlated image result` kèm `jobId`, `index`, `output`, tổng candidate và số viewer bị loại vì sai prompt; log không chứa URL ảnh hoặc prompt.
+
+Nếu lỗi selector/tương quan này xảy ra trong một batch, extension tự mở circuit breaker và dừng toàn bộ lane ảnh. Prompt lỗi được trả về queue theo chính sách retry, còn các prompt sau không bị chạy rồi lỗi hàng loạt. Sau khi sửa/reload tab Flow, mở popup extension và bấm **Lưu & chạy** để xóa circuit breaker rồi tiếp tục queue.
 
 ### Ảnh tham chiếu URL ngoài không tải được
 

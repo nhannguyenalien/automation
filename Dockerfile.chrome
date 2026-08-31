@@ -1,0 +1,27 @@
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    DISPLAY=:99 \
+    FLOW_EXTENSION_API_URL=http://backend:8787 \
+    FLOW_EXTENSION_WORKER_ID=coolify-chrome \
+    FLOW_EXTENSION_ENABLED=true \
+    FLOW_EXTENSION_FORCE_CONFIG=true
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      chromium fonts-liberation fonts-noto-color-emoji jq novnc openbox \
+      procps websockify x11vnc xvfb ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 1000 --shell /bin/bash chrome \
+    && mkdir -p /data/chromium /opt/flow-extension \
+    && chown -R chrome:chrome /data/chromium /opt/flow-extension
+
+COPY --chown=chrome:chrome flow-extension/ /opt/flow-extension/
+COPY --chown=chrome:chrome docker/chrome/entrypoint.sh /usr/local/bin/chrome-entrypoint
+RUN chmod +x /usr/local/bin/chrome-entrypoint
+
+USER chrome
+WORKDIR /home/chrome
+EXPOSE 6080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD pgrep -x chromium >/dev/null && pgrep -f websockify >/dev/null || exit 1
+ENTRYPOINT ["/usr/local/bin/chrome-entrypoint"]

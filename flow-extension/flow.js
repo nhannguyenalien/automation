@@ -110,37 +110,121 @@ function findSubmit(editor) {
   })[0];
 }
 
-function resultCandidates() {
-  const nodes = [...document.querySelectorAll('img,[role="img"],a,button')].filter(visible);
-  return nodes.filter(el => {
-    const label = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("alt") || ""} ${text(el)}`;
-    if (/Hình ảnh được tạo|Generated image|Open image/i.test(label)) return true;
-    if (el.tagName !== "IMG") return false;
-    const rect = el.getBoundingClientRect();
-    return rect.width >= 200 && rect.height >= 150;
-  });
-}
-
-function resultSignature(el) {
-  const image = el.tagName === "IMG" ? el : el.querySelector?.("img");
-  return [
-    image?.currentSrc || image?.src || "",
-    el.getAttribute("aria-label") || "",
-    el.getAttribute("alt") || ""
-  ].join("|");
-}
-
 function clickableResult(el) {
   return el.closest('a,button,[role="button"]') || el;
 }
 
+function normalizedPrompt(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[\u2018\u2019\u201C\u201D]/g, '"')
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase();
+}
+
+function viewerMatchesPrompt(prompt) {
+  const expected = normalizedPrompt(prompt);
+  if (!expected) return false;
+  // Flow does not expose the prompt on gallery cards. It does expose the full
+  // prompt in the image viewer, even while the visual text is collapsed.
+  return normalizedPrompt(document.body.innerText).includes(expected);
+}
+
 function generatedLinks() {
   return [...document.querySelectorAll('a[href]')].filter(el => {
-    const label = `${el.getAttribute("aria-label") || ""} ${text(el)}`;
+    if (!visible(el)) return false;
     const image = el.querySelector("img");
+    if (!image || !visible(image) || !(image.currentSrc || image.src)) return false;
+    const labels = [labelText(el), labelText(image)];
+    let context = el.parentElement;
+    for (let depth = 0; context && depth < 4; depth += 1, context = context.parentElement) {
+      // Stop before reaching the shared gallery container. Its text may
+      // include a neighbouring Veo card and would incorrectly reject this
+      // otherwise valid image card.
+      if (context.querySelectorAll?.('a[href]').length > 1) break;
+      labels.push(labelText(context));
+      if (context.matches?.('article,[role="listitem"],[role="gridcell"],li')) break;
+    }
+    const label = labels.join(" ");
+    // A video thumbnail is still an <img>. Never let it enter the image lane,
+    // even when its card is temporarily mounted inside the Images library.
+    if (el.querySelector("video") || /Veo|video|play_circle|Hình thu nhỏ video|Phát|Play/i.test(label)) return false;
     const rect = image?.getBoundingClientRect();
-    return /Hình ảnh được tạo|Generated image|Open image/i.test(label) || (image && rect.width >= 200 && rect.height >= 150);
+    return /Hình ảnh được tạo|Generated image|Open image/i.test(label) || (rect.width >= 200 && rect.height >= 150);
   });
+}
+
+function imageLinkSnapshot() {
+  const hrefs = new Set();
+  const sources = new Set();
+  for (const link of generatedLinks()) {
+    hrefs.add(link.href);
+    const image = link.querySelector("img");
+    if (image?.currentSrc || image?.src) sources.add(image.currentSrc || image.src);
+  }
+  return { hrefs, sources };
+}
+
+async function stableImageBaseline(timeout = 10000, quietMs = 2500) {
+  const started = Date.now();
+  let lastChangeAt = started;
+  let previousKey = "";
+  let snapshot = imageLinkSnapshot();
+  while (Date.now() - started < timeout) {
+    snapshot = imageLinkSnapshot();
+    const key = `${[...snapshot.hrefs].sort().join("\n")}\0${[...snapshot.sources].sort().join("\n")}`;
+    if (key !== previousKey) {
+      previousKey = key;
+      lastChangeAt = Date.now();
+    } else if (Date.now() - lastChangeAt >= quietMs) {
+      return snapshot;
+    }
+    await sleep(250);
+  }
+  throw new Error("Thư viện ảnh Flow chưa ổn định trước khi tạo; từ chối ghép kết quả không chắc chắn");
+}
+
+function visibleImageDialogs() {
+  return deepElements('[role="dialog"],[aria-modal="true"]')
+    .filter(dialog => visible(dialog) && !dialog.querySelector("video"));
+}
+
+function imageViewerCandidate() {
+  const dialogs = visibleImageDialogs()
+    .sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return (br.width * br.height) - (ar.width * ar.height);
+    });
+  const roots = dialogs.length ? dialogs : [document];
+  for (const root of roots) {
+    const images = [...root.querySelectorAll("img")]
+      .filter(image => {
+        if (!visible(image)) return false;
+        const source = image.currentSrc || image.src || "";
+        if (!source) return false;
+        const label = `${labelText(image)} ${labelText(image.parentElement)}`;
+        if (/Veo|video|play_circle|Hình thu nhỏ video|Phát|Play/i.test(label)) return false;
+        const rect = image.getBoundingClientRect();
+        // Flow renders the large viewer on a canvas. Its original media URL is
+        // exposed by the selected 248x138 result thumbnail beside that canvas.
+        // The full prompt has already been matched before this function runs,
+        // so accepting a visible image-sized thumbnail is safe and avoids
+        // waiting forever for a large <img> that Flow never creates.
+        const largeEnough = rect.width >= 200 && rect.height >= 120;
+        // The caller has already verified the viewer's full prompt exactly.
+        // Flow may preload the viewer-sized URL while still in the gallery, so
+        // requiring a new src here can reject the correct image. At this point
+        // the exact prompt + a large, visible, non-video image is the stronger
+        // and more stable correlation signal.
+        return largeEnough;
+      })
+      .sort((a, b) => (b.getBoundingClientRect().width * b.getBoundingClientRect().height) -
+        (a.getBoundingClientRect().width * a.getBoundingClientRect().height));
+    if (images[0]) return images[0];
+  }
+  return null;
 }
 
 function deepElements(selector, root = document) {
@@ -248,15 +332,11 @@ async function openFlowSection(type) {
   }, 60000, `mục ${type === "video" ? "Video" : "Hình ảnh"} ở sidebar Flow`);
 
   await clickLikeUser(section);
-  await sleep(1000);
+  await sleep(700);
 
-  // Wait for the composer to change lanes before touching its settings.
-  const expected = type === "video" ? /Video|Veo/i : /Nano Banana|Imagen|Hình ảnh|Image/i;
-  await waitFor(() => deepElements("button").find(element => {
-    const label = labelText(element);
-    return visible(element) && expected.test(label) &&
-      /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) && /x\d/i.test(label);
-  }), 30000, `trình tạo ${type === "video" ? "video" : "ảnh"}`);
+  // The sidebar only filters the media library. It does not switch the
+  // composer from Nano Banana to Veo (or back). `configure` owns that switch
+  // after opening the composer's settings popover.
 }
 
 async function configure(ratio, type = "image", model = null, outputs = 1) {
@@ -270,8 +350,9 @@ async function configure(ratio, type = "image", model = null, outputs = 1) {
   const expectedMode = type === "video" ? /Video|Veo/i : /Nano Banana|Imagen|Hình ảnh|Image/i;
   const findModeButton = () => deepElements("button").find(el => {
     const label = labelText(el);
-    return visible(el) && expectedMode.test(label) &&
-      /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) && /x\d/i.test(label);
+    if (!visible(el) || !/(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) || !/x\d/i.test(label)) return false;
+    const rect = el.getBoundingClientRect();
+    return rect.top > window.innerHeight * 0.6 && rect.width < 400 && rect.height < 100;
   });
   const findModeMenu = () => deepElements('[role="menu"],[role="dialog"],[role="listbox"],div')
     .filter(el => {
@@ -295,18 +376,57 @@ async function configure(ratio, type = "image", model = null, outputs = 1) {
   // mode menu whenever the next control is no longer visible.
   async function ensureMenuControl(pattern, label) {
     const selector = '[role="tab"],[role="radio"],[role="option"],[role="menuitem"],[role="button"],button,label';
-    let menu = findModeMenu();
-    if (!menu) {
+    const findControl = () => {
+      // Flow replaces the complete settings popover when Image/Video or a
+      // generation mode is selected. Never retain a menu DOM node across a
+      // click: it becomes detached even though the replacement looks the
+      // same on screen.
+      const currentMenu = findModeMenu();
+      if (currentMenu) {
+        const scoped = deepElements(selector, currentMenu)
+          .find(el => visible(el) && pattern.test(labelText(el)));
+        if (scoped) return scoped;
+      }
+
+      // Some current Flow builds do not expose a role on the popover root.
+      // The individual controls are still accessible, so use the visible
+      // lower-screen control as a safe fallback (sidebar items sit higher).
+      return deepElements(selector).find(el => {
+        if (!visible(el) || !pattern.test(labelText(el))) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.top > window.innerHeight * 0.35;
+      }) || null;
+    };
+
+    let control = findControl();
+    if (!control) {
       mode = await waitFor(findModeButton, 10000, "nút cấu hình Flow");
       await clickLikeUser(mode);
       await sleep(500);
-      menu = await waitFor(findModeMenu, 10000, "menu cấu hình Flow");
+      await waitFor(findModeMenu, 10000, "menu cấu hình Flow");
     }
-    return waitFor(
-      () => deepElements(selector, menu).find(el => visible(el) && pattern.test(labelText(el))),
-      10000,
-      label
+    return waitFor(findControl, 10000, label);
+  }
+
+  // The media-library sidebar and the composer keep independent state. Flow
+  // can therefore show the Hình ảnh sidebar while the composer is still on
+  // Video. Always re-select Hình ảnh for image jobs; the model-button label
+  // is not a reliable indication immediately after changing sidebar tabs.
+  // Video can keep the conditional path because selecting it repeatedly may
+  // reset its Thành phần/Khung hình sub-mode.
+  if (type === "image" || !expectedMode.test(labelText(mode))) {
+    const mediaType = await ensureMenuControl(
+      type === "video"
+        ? /(?:^|\s)(?:Video|Videos)\s*$/i
+        : /(?:^|\s)(?:Hình ảnh|Images?)\s*$/i,
+      `loại trình tạo ${type === "video" ? "Video" : "Hình ảnh"}`
     );
+    await clickLikeUser(mediaType);
+    await sleep(500);
+    mode = await waitFor(() => {
+      const current = findModeButton();
+      return current && expectedMode.test(labelText(current)) ? current : null;
+    }, 10000, `trình tạo ${type === "video" ? "Veo" : "ảnh"}`);
   }
 
   if (type === "video") {
@@ -392,6 +512,7 @@ function visibleFlowError() {
 
 async function generate(task) {
   const expectedOutputs = task.type === "image" ? Math.max(1, Math.min(4, Number(task.outputs || 1))) : 1;
+  const recoverExistingImage = task.type === "image" && Number(task.attempt || 1) > 1;
   await openFlowSection(task.type);
   await configure(task.ratio, task.type, task.model, expectedOutputs);
   if (task.referenceImageDataUrl) await attachReference(task.referenceImageDataUrl);
@@ -400,37 +521,51 @@ async function generate(task) {
   const editor = await waitFor(() => [...document.querySelectorAll('[contenteditable="true"]')]
     .filter(visible)
     .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0], 60000, "ô prompt Flow");
-  const beforeLinks = new Set([...document.querySelectorAll('a[href]')].map(el => el.href));
   await inputLikeUser(editor, task.prompt);
   const submit = await waitFor(() => findSubmit(editor), 20000, "nút mũi tên Tạo (Flow chưa ghi nhận prompt)");
-  await clickLikeUser(submit);
-  // Flow can lazy-load an older card immediately after Generate is clicked.
-  // Track every newly discovered URL and wait for the gallery to settle; the
-  // actual output is the most recently introduced generated-image link.
+  // Let lazy-loaded historical cards settle before taking the baseline. A
+  // card is accepted only when both its href and image source are new.
+  const before = recoverExistingImage ? { hrefs: new Set(), sources: new Set() } :
+    task.type === "image" ? await stableImageBaseline() : {
+    hrefs: new Set([...document.querySelectorAll('a[href]')].map(el => el.href)),
+    sources: new Set()
+  };
+  // A previous attempt may have successfully created the image and then lost
+  // the gallery/viewer transition. On retry, do not spend another generation:
+  // inspect existing cards and accept only a viewer whose full prompt matches.
+  if (!recoverExistingImage) await clickLikeUser(submit);
+  // Flow gallery cards do not contain their prompt. Collect only stable, new
+  // asset IDs here; image prompts are verified after opening each viewer.
   const discovered = new Map();
-  const generationStartedAt = Date.now();
-  let lastDiscoveryAt = generationStartedAt;
+  const generationStartedAt = Date.now() - (recoverExistingImage ? 55000 : 0);
+  let lastDiscoveryAt = Date.now();
   const result = await waitFor(() => {
     const flowError = visibleFlowError();
     if (flowError) throw new Error(`Google Flow: ${flowError}`);
     const now = Date.now();
     const candidates = task.type === "video" ? generatedVideoLinks() : generatedLinks();
     for (const link of candidates) {
-      if (!visible(link) || beforeLinks.has(link.href) || discovered.has(link.href)) continue;
-      discovered.set(link.href, { link, discoveredAt: now });
+      const source = link.querySelector("img")?.currentSrc || link.querySelector("img")?.src || "";
+      if (!visible(link) || before.hrefs.has(link.href) || (task.type === "image" && before.sources.has(source)) || discovered.has(link.href)) continue;
+      discovered.set(link.href, { link, source, discoveredAt: now });
       lastDiscoveryAt = now;
     }
     const waitedLongEnough = now - generationStartedAt >= 55000;
     const galleryIsQuiet = now - lastDiscoveryAt >= 8000;
     if (discovered.size < expectedOutputs || !waitedLongEnough || !galleryIsQuiet) return null;
-    return [...discovered.values()].slice(0, expectedOutputs).map(value => value.link.href);
-  }, Number(task.timeoutMs || (task.type === "video" ? 600000 : 180000)), task.type === "video" ? "video kết quả mới" : "ảnh kết quả mới");
+    // Keep a small candidate pool. Viewer prompt verification below rejects
+    // lazy-mounted historical cards without ever returning their media.
+    return [...discovered.values()].slice(0, Math.max(expectedOutputs, 12)).map(value => value.link.href);
+  }, Number(task.timeoutMs || (task.type === "video" ? 600000 : 180000)),
+  task.type === "video"
+    ? "video kết quả mới"
+    : "ảnh kết quả mới");
   const resultUrls = result;
-  const firstResult = [...document.querySelectorAll('a[href]')].find(link => link.href === resultUrls[0]);
-  if (!firstResult) throw new Error("Thẻ kết quả mới đã biến mất khỏi thư viện Flow");
-  await clickLikeUser(clickableResult(firstResult));
-  await sleep(1000);
   if (task.type === "video") {
+    const firstResult = [...document.querySelectorAll('a[href]')].find(link => link.href === resultUrls[0]);
+    if (!firstResult) throw new Error("Thẻ kết quả mới đã biến mất khỏi thư viện Flow");
+    await clickLikeUser(clickableResult(firstResult));
+    await sleep(1000);
     const outputVideo = await waitFor(() => [...document.querySelectorAll("video")]
       .filter(el => visible(el) && (el.currentSrc || el.src))
       .sort((a, b) => (b.getBoundingClientRect().width * b.getBoundingClientRect().height) - (a.getBoundingClientRect().width * a.getBoundingClientRect().height))[0], 60000, "video lớn để tải");
@@ -448,33 +583,40 @@ async function generate(task) {
       videoUrl: uploaded.mediaUrl, objectKey: uploaded.objectKey };
   }
   const downloads = [];
-  for (let outputIndex = 0; outputIndex < resultUrls.length; outputIndex += 1) {
-    if (outputIndex > 0) {
-      const nextResult = await waitFor(
-        () => [...document.querySelectorAll('a[href]')].find(link => visible(link) && link.href === resultUrls[outputIndex]),
-        30000,
-        `thẻ ảnh kết quả ${outputIndex + 1}`
-      );
-      await clickLikeUser(clickableResult(nextResult));
-      await sleep(1000);
-    }
-    const outputImage = await waitFor(() => {
-      return [...document.querySelectorAll("img")]
-        .filter(el => visible(el) && (el.currentSrc || el.src))
-        .sort((a, b) => (b.getBoundingClientRect().width * b.getBoundingClientRect().height) - (a.getBoundingClientRect().width * a.getBoundingClientRect().height))[0];
-    }, 30000, `ảnh lớn ${outputIndex + 1} để tải`);
-    const directDownload = await chrome.runtime.sendMessage({
-      type: "DOWNLOAD_URL",
-      url: outputImage.currentSrc || outputImage.src,
+  let rejectedPromptMismatch = 0;
+  for (let candidateIndex = 0; candidateIndex < resultUrls.length && downloads.length < expectedOutputs; candidateIndex += 1) {
+    // Never navigate the gallery tab to /edit/<asset>: Flow can perform a full
+    // navigation there, which destroys this content-script message channel.
+    // The service worker opens a short-lived viewer tab and closes it after
+    // prompt verification/download, leaving generation state untouched.
+    const inspected = await chrome.runtime.sendMessage({
+      type: "INSPECT_IMAGE_URL",
+      url: resultUrls[candidateIndex],
+      prompt: task.prompt,
       jobId: task.jobId,
       index: task.index,
-      output: outputIndex + 1
+      output: downloads.length + 1
     });
-    if (!directDownload?.ok) throw new Error(directDownload?.error || `Không tải được ảnh ${outputIndex + 1}`);
-    downloads.push(directDownload);
-    const back = [...document.querySelectorAll('button,[role="button"]')].find(el => visible(el) && /Quay lại|Back/i.test(`${el.getAttribute("aria-label") || ""} ${text(el)}`));
-    if (back) await clickLikeUser(back).catch(() => {});
-    await sleep(700);
+    if (!inspected?.ok) throw new Error(inspected?.error || `Không kiểm tra được ảnh ứng viên ${candidateIndex + 1}`);
+    if (!inspected.matched) {
+      rejectedPromptMismatch += 1;
+      // This is an expected correlation check, not an extension error. Keep it
+      // as a single readable info line so Chrome does not surface [object Object]
+      // as a scary item in the extension Errors page.
+      console.info(`[Flow Worker] bỏ qua ảnh không khớp prompt; job=${task.jobId}; item=${task.index}; candidate=${candidateIndex + 1}; url=${resultUrls[candidateIndex]}`);
+      continue;
+    }
+    downloads.push(inspected.download);
+    console.info("[Flow Worker] selected correlated image result", {
+      jobId: task.jobId,
+      index: task.index,
+      output: downloads.length,
+      candidatesSeen: discovered.size,
+      rejectedPromptMismatch
+    });
+  }
+  if (downloads.length < expectedOutputs) {
+    throw new Error(`Chỉ xác minh được ${downloads.length}/${expectedOutputs} ảnh đúng prompt; đã loại ${rejectedPromptMismatch} ảnh không khớp`);
   }
   return {
     ok: true,
@@ -488,8 +630,31 @@ async function generate(task) {
   };
 }
 
+async function inspectImageCandidate(message) {
+  const promptMatched = await waitFor(
+    () => viewerMatchesPrompt(message.prompt),
+    15000,
+    "prompt trong viewer ảnh"
+  ).then(() => true).catch(() => false);
+  if (!promptMatched) return { ok: true, matched: false };
+  const outputImage = await waitFor(() => imageViewerCandidate(), 30000, "ảnh viewer đúng prompt");
+  const download = await chrome.runtime.sendMessage({
+    type: "DOWNLOAD_URL",
+    url: outputImage.currentSrc || outputImage.src,
+    jobId: message.jobId,
+    index: message.index,
+    output: message.output
+  });
+  if (!download?.ok) throw new Error(download?.error || "Không tải được ảnh viewer");
+  return { ok: true, matched: true, download };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === "PING") return sendResponse({ ok: true });
+  if (message.type === "INSPECT_IMAGE_CANDIDATE") {
+    inspectImageCandidate(message).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message.type === "GENERATE") {
     generate(message.task).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
