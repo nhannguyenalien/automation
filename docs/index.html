@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Google AI Browser API — Hướng dẫn</title>
+  <style>
+    :root{color-scheme:dark;--bg:#090b10;--panel:#11151d;--line:#252b37;--text:#edf1f7;--muted:#9ba7b8;--blue:#78a9ff;--green:#55d991;--code:#080a0f}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(circle at 70% 0,#172445 0,transparent 32%),var(--bg);color:var(--text);font:15px/1.65 ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}a{color:var(--blue);text-decoration:none}.layout{max-width:1160px;margin:auto;padding:32px 22px 80px;display:grid;grid-template-columns:220px 1fr;gap:38px}aside{position:sticky;top:24px;height:max-content}.brand{font-weight:750;font-size:17px;margin-bottom:22px}.nav a{display:block;color:var(--muted);padding:6px 0}.nav a:hover{color:var(--text)}main{min-width:0}.hero{padding:36px;border:1px solid var(--line);border-radius:22px;background:linear-gradient(145deg,rgba(29,39,62,.9),rgba(14,17,24,.92));margin-bottom:28px}h1{font-size:clamp(30px,5vw,52px);line-height:1.08;margin:0 0 14px;letter-spacing:-.035em}h2{margin:42px 0 12px;font-size:26px}h3{margin:25px 0 8px}.muted,p{color:var(--muted)}.badge{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:99px;padding:5px 11px;margin-bottom:18px;background:#0c1017}.dot{width:8px;height:8px;border-radius:50%;background:#d6a447}.dot.ok{background:var(--green);box-shadow:0 0 12px var(--green)}.base{display:flex;gap:8px;align-items:center;margin-top:22px}.base code{flex:1}.card{background:rgba(17,21,29,.88);border:1px solid var(--line);border-radius:15px;padding:20px;margin:14px 0}.endpoint{display:flex;align-items:center;gap:10px}.method{font-size:12px;font-weight:800;color:#06110b;background:var(--green);padding:3px 8px;border-radius:6px}.get{background:var(--blue);color:#08101d}pre,code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}code{background:var(--code);border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:#d8e5ff}pre{position:relative;overflow:auto;background:var(--code);border:1px solid var(--line);border-radius:12px;padding:18px;margin:12px 0;color:#d8e5ff;line-height:1.55}pre code{border:0;padding:0}.copy{border:1px solid var(--line);background:#171c26;color:var(--text);border-radius:8px;padding:7px 10px;cursor:pointer}.copy:hover{background:#222a38}.note{border-left:3px solid #d6a447;padding:11px 15px;background:#19160e;color:#d9c99d;border-radius:0 9px 9px 0}.steps{counter-reset:s}.steps>div{counter-increment:s;margin:15px 0;padding-left:42px;position:relative}.steps>div:before{content:counter(s);position:absolute;left:0;top:0;width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#1b3159;color:#bcd3ff;font-weight:700}table{width:100%;border-collapse:collapse}.table{overflow:auto}th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--text)}td{color:var(--muted)}@media(max-width:780px){.layout{display:block;padding-top:18px}aside{position:static;margin-bottom:24px}.nav{display:flex;flex-wrap:wrap;gap:5px 16px}.hero{padding:24px}.base{align-items:stretch;flex-direction:column}}
+  </style>
+</head>
+<body><div class="layout">
+  <aside><div class="brand">Google AI Browser API</div><nav class="nav">
+    <a href="#start">Bắt đầu nhanh</a><a href="#chat">Chat Gemini</a><a href="#text-image">Text to image</a><a href="#image-image">Image to image</a><a href="#video">Video</a><a href="#jobs">Theo dõi job</a><a href="#reference">Tham số</a><a href="#production">Vận hành</a>
+  </nav></aside>
+  <main>
+    <section class="hero"><div class="badge"><span class="dot" id="healthDot"></span><span id="healthText">Đang kiểm tra API…</span></div><h1>API cho Gemini Chat và Google Flow</h1><p>Một contract chung cho chat, ảnh và video: xong nhanh trả dữ liệu ngay; chạy lâu trả ID để client lấy kết quả sau.</p><div class="base"><strong>Base URL</strong><code id="baseUrl"></code><button class="copy" data-copy="#baseUrl">Sao chép</button></div></section>
+
+    <h2 id="start">Bắt đầu nhanh</h2>
+    <div class="card"><div class="endpoint"><span class="method get">GET</span><code>/health</code></div><pre><code>curl "$BASE_URL/health"</code></pre></div>
+    <div class="note">Máy chạy API phải mở Chrome, đăng nhập Google Pro và bật extension. Job được lưu trên Turso nên không mất khi API restart và có thể dùng chung giữa nhiều máy. Funnel hiện đưa API ra Internet; hãy đặt API key nếu URL được chia sẻ.</div>
+
+    <h2 id="chat">Chat Gemini</h2><p>Mặc định extension chủ động chọn <code>3.5-flash-lite</code>. Đặt <code>model</code> thành <code>3.1-pro</code> nếu cần.</p>
+    <div class="card"><div class="endpoint"><span class="method">POST</span><code>/chat</code></div><pre><code>curl -X POST "$BASE_URL/chat" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: chat-batch-UNIQUE_ID" \
+  -d '{
+    "prompt": "Viết 5 tiêu đề quảng cáo cho một khóa học AI",
+    "model": "3.5-flash-lite",
+    "newConversation": true
+  }'</code></pre><p>Gửi batch bằng <code>"prompts": ["Câu 1", "Câu 2"]</code>. Nếu xong nhanh API trả HTTP 200 với dữ liệu; nếu chưa xong trả HTTP 202 với <code>id</code>, <code>Location</code> và <code>Retry-After</code>. Nếu POST mất response, retry đúng payload với cùng key để nhận lại job cũ.</p></div>
+
+    <h2 id="text-image">Text to image</h2>
+    <div class="card"><div class="endpoint"><span class="method">POST</span><code>/generate</code></div><pre><code>curl -X POST "$BASE_URL/generate" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: image-request-UNIQUE_ID" \
+  -d '{
+    "prompt": "Một chú mèo máy ở Hội An, cinematic",
+    "ratio": "16:9",
+    "outputs": 1,
+    "worker": "extension",
+    "projectUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID"
+  }'</code></pre><p>Mặc định một prompt tạo đúng một ảnh. Chỉ đặt <code>outputs</code> lớn hơn 1 khi thật sự muốn nhiều phương án. Một job nhận tối đa 100 ảnh; API xử lý ngầm tuần tự theo nhóm tiến độ 10 prompt. Giữ nguyên <code>Idempotency-Key</code> khi retry cùng một yêu cầu để API trả lại job cũ, không tạo thêm ảnh. Sau khi nhận <code>id</code>, chỉ dùng <code>GET /jobs/:id</code> để theo dõi.</p></div>
+
+    <h2 id="image-image">Image to image</h2><p>Upload ảnh gốc trước, sau đó dùng URL nhận được làm <code>referenceImageUrl</code>.</p>
+    <div class="steps"><div><h3>Upload ảnh tham chiếu</h3><pre><code>curl -X POST "$BASE_URL/assets" \
+  -H "Content-Type: image/jpeg" \
+  --data-binary @anh-goc.jpg</code></pre><p>Kết quả có dạng <code>{ "url": "https://…/assets/…jpg" }</code>.</p></div><div><h3>Tạo ảnh từ ảnh gốc</h3><pre><code>curl -X POST "$BASE_URL/generate" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: image-edit-UNIQUE_ID" \
+  -d '{
+    "prompt": "Giữ nhân vật, đổi bối cảnh thành Hội An ban đêm",
+    "ratio": "16:9",
+    "outputs": 1,
+    "worker": "extension",
+    "projectUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID",
+    "referenceImageUrl": "URL_NHAN_DUOC_O_BUOC_1"
+  }'</code></pre><p>Image-to-image cũng nhận <code>outputs: 1..4</code>; bỏ field thì mặc định một ảnh cho mỗi prompt.</p></div></div>
+
+    <h2 id="video">Video</h2>
+    <div class="card"><div class="endpoint"><span class="method">POST</span><code>/video</code></div><pre><code>curl -X POST "$BASE_URL/video" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: video-request-UNIQUE_ID" \
+  -d '{
+    "prompt": "Rồng máy bay trên Vịnh Hạ Long lúc bình minh",
+    "ratio": "16:9"
+  }'</code></pre><p>Video dùng cùng contract HTTP 200/202 và cùng cơ chế lấy kết quả bằng <code>GET /jobs/:id</code>. URL hoàn tất nằm trong <code>videos[]</code>.</p></div>
+
+    <h2 id="jobs">Theo dõi và lấy kết quả</h2>
+    <div class="note">Contract chung: API chờ bằng event nội bộ, mặc định 20 giây cho chat và 2 giây cho ảnh/video, không poll Turso trong lúc chờ. POST trả HTTP 200 nếu đã xong; nếu chưa xong trả HTTP 202 + <code>id</code>. Với 202, gọi <code>GET /jobs/:id</code> theo <code>retryAfterSeconds</code> và dừng khi <code>completed</code> hoặc <code>failed</code>. Nếu POST mất response, retry đúng payload và cùng <code>Idempotency-Key</code>.</div>
+    <div class="card"><div class="endpoint"><span class="method get">GET</span><code>/jobs/:id</code></div><pre><code>curl "$BASE_URL/jobs/JOB_ID"</code></pre><p><code>queued</code>: đang xếp hàng; <code>running</code>: extension đang xử lý; <code>completed</code>: đã xong toàn bộ; <code>failed</code>: thất bại sau retry. Ảnh thành công là các URL public S3 trong <code>images[]</code>; chat nằm trong <code>response</code> hoặc <code>responses[]</code>.</p><pre><code>{
+  "id": "…",
+  "status": "completed",
+  "progress": 2,
+  "total": 2,
+  "images": ["https://s3a.schoolsai.work/…"]
+}</code></pre><h3>Ví dụ JavaScript: tạo job và chờ kết quả</h3><pre><code>async function generateAndWait(prompt) {
+  const idempotencyKey = crypto.randomUUID();
+  const created = await fetch(`${BASE_URL}/generate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey
+    },
+    body: JSON.stringify({
+      prompt,
+      ratio: "16:9",
+      outputs: 1,
+      worker: "extension",
+      projectUrl: "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID"
+    })
+  });
+  if (!created.ok) throw new Error(await created.text());
+  let job = await created.json();
+  if (job.status === "completed") return job.images;
+  if (job.status === "failed") throw new Error(job.error || "Job failed");
+  const { id } = job;
+
+  const deadline = Date.now() + 15 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 4000));
+    const response = await fetch(`${BASE_URL}/jobs/${id}`);
+    if (!response.ok) throw new Error(await response.text());
+    job = await response.json();
+    if (job.status === "completed") return job.images;
+    if (job.status === "failed") throw new Error(job.error || "Job failed");
+  }
+  throw new Error(`Timeout khi chờ job ${id}`);
+}</code></pre></div>
+
+    <h2 id="reference">Tham số chính</h2><div class="card table"><table><thead><tr><th>API</th><th>Trường</th><th>Giá trị</th></tr></thead><tbody><tr><td>/generate</td><td>prompt / prompts</td><td>Chuỗi hoặc mảng, tối đa 100; xử lý tuần tự theo nhóm 10</td></tr><tr><td>/generate</td><td>ratio</td><td>16:9, 4:3, 1:1, 3:4, 9:16</td></tr><tr><td>/generate</td><td>outputs</td><td>1–4 ảnh cho mỗi prompt; mặc định 1, chỉ extension khi lớn hơn 1</td></tr><tr><td>/generate, /chat, /video</td><td>Idempotency-Key</td><td>Header định danh request; retry cùng request phải giữ nguyên key</td></tr><tr><td>/generate</td><td>worker</td><td>extension (khuyên dùng)</td></tr><tr><td>/generate</td><td>projectUrl</td><td>URL project Flow; có thể cấu hình mặc định bằng FLOW_PROJECT_URL</td></tr><tr><td>/generate</td><td>referenceImageUrl</td><td>URL HTTP(S), chỉ extension</td></tr><tr><td>/generate</td><td>timeoutMs</td><td>Timeout mỗi prompt phía worker; mặc định 180.000 ms</td></tr><tr><td>/generate</td><td>maxRetries</td><td>0–5; mặc định 0 để tránh tạo ảnh trùng</td></tr><tr><td>/chat</td><td>maxRetries</td><td>0–5; mặc định 2</td></tr><tr><td>/chat</td><td>model</td><td>3.5-flash-lite (mặc định) hoặc 3.1-pro</td></tr><tr><td>/chat</td><td>newConversation</td><td>true / false</td></tr></tbody></table></div>
+
+    <h2 id="production">Vận hành ổn định</h2><div class="card"><ul><li>Khởi động bằng <code>npm run api</code>; lệnh tự đọc file <code>.env</code>.</li><li>Cấu hình <code>TURSO_DATABASE_URL</code> và <code>TURSO_AUTH_TOKEN</code>. Turso là nguồn dữ liệu queue chính.</li><li>Giữ đúng ba tab cố định: Gemini Chat, Flow Image và Flow Video. Extension bấm Hình ảnh/Video ở sidebar và không đổi loại media trong popup cấu hình.</li><li>Không đóng Chrome hoặc tắt extension khi job đang chạy.</li><li>Restart API sẽ tự đưa job đang chạy về hàng đợi.</li><li><code>FLOW_MAX_QUEUED</code> mặc định 100. <code>FLOW_IMAGE_MAX_RETRIES</code> mặc định 0; <code>FLOW_MAX_RETRIES</code> mặc định 2 cho các loại khác.</li><li>Client POST một lần: HTTP <code>200</code> thì dùng kết quả ngay; HTTP <code>202</code> thì lưu <code>id</code> và poll bằng GET. Dùng <code>Idempotency-Key</code> cho mọi job chat, ảnh và video.</li><li><code>/health</code> trả số job queued/running/completed/failed và trạng thái Turso.</li><li>Vì Funnel public Internet, nên bật <code>FLOW_API_KEY</code> trước khi dùng production hoặc chia sẻ URL.</li></ul></div>
+  </main>
+</div><script>
+const base=location.origin;document.querySelector('#baseUrl').textContent=base;
+document.querySelectorAll('pre code').forEach(el=>{el.textContent=el.textContent.replaceAll('$BASE_URL',base)});
+document.querySelectorAll('[data-copy]').forEach(btn=>btn.onclick=async()=>{const el=document.querySelector(btn.dataset.copy);await navigator.clipboard.writeText(el.textContent);const old=btn.textContent;btn.textContent='Đã chép';setTimeout(()=>btn.textContent=old,1200)});
+fetch('/health').then(r=>r.ok?r.json():Promise.reject()).then(()=>{healthDot.classList.add('ok');healthText.textContent='API đang hoạt động'}).catch(()=>healthText.textContent='Không kết nối được API');
+</script></body></html>
