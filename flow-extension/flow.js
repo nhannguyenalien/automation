@@ -264,7 +264,7 @@ async function attachReference(dataUrl) {
   const filename = `reference-${Date.now()}.${extension}`;
 
   const addButton = await waitFor(
-    () => buttonWithLabel(/^(?:add_2\s*)?(?:Tạo|Add media|Thêm nội dung nghe nhìn)$/i),
+    () => buttonWithLabel(/^(?:add(?:_2)?\s*)?(?:Tạo|Add media|Thêm nội dung nghe nhìn)$/i),
     60000,
     "nút + cạnh ô prompt"
   ).catch(() => null);
