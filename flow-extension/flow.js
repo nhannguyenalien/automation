@@ -299,6 +299,11 @@ async function attachReference(dataUrl) {
       .join("|");
   };
   const previewBeforeUpload = previewFingerprint(initialDialog);
+  const imageSourcesBeforeUpload = new Set(
+    initialDialog
+      ? [...initialDialog.querySelectorAll("img")].map(el => el.currentSrc || el.src || "").filter(Boolean)
+      : []
+  );
 
   const uploadButton = await waitFor(() => buttonWithLabel(/(?:Tải nội dung nghe nhìn lên|Upload media)/i), 10000, "nút tải ảnh lên");
   uploadButton.scrollIntoView({ block: "center", inline: "center" });
@@ -338,18 +343,28 @@ async function attachReference(dataUrl) {
     await clickLikeUser(uploadState.option);
   } else if (!uploadState?.selected) {
     const uploadsTab = await waitFor(
-      () => buttonWithLabel(/^(?:Tệp tải lên|Uploads?)$/i),
+      () => {
+        const modal = referenceDialog();
+        if (!modal) return null;
+        return deepElements('button,[role="button"],[role="tab"]', modal).find(el => {
+          if (!visible(el)) return false;
+          const label = `${el.getAttribute("aria-label") || ""} ${el.getAttribute("title") || ""} ${text(el)}`;
+          return /(?:Tệp tải lên|Uploads?)/i.test(label);
+        }) || null;
+      },
       10000,
       "mục Tệp tải lên"
-    );
-    await clickLikeUser(uploadsTab);
-    await sleep(700);
+    ).catch(() => null);
+    if (uploadsTab) {
+      await clickLikeUser(uploadsTab);
+      await sleep(700);
+    }
 
     const newestUpload = await waitFor(() => {
       const modal = referenceDialog();
       if (!modal) return null;
       const modalRect = modal.getBoundingClientRect();
-      return [...modal.querySelectorAll("img")]
+      const candidates = [...modal.querySelectorAll("img")]
         .filter(el => {
           if (!visible(el)) return false;
           const rect = el.getBoundingClientRect();
@@ -357,10 +372,14 @@ async function attachReference(dataUrl) {
             rect.left < modalRect.left + modalRect.width * 0.55;
         })
         .sort((a, b) => {
+          const aNew = imageSourcesBeforeUpload.has(a.currentSrc || a.src || "") ? 0 : 1;
+          const bNew = imageSourcesBeforeUpload.has(b.currentSrc || b.src || "") ? 0 : 1;
+          if (aNew !== bNew) return bNew - aNew;
           const ar = a.getBoundingClientRect();
           const br = b.getBoundingClientRect();
           return ar.top - br.top || ar.left - br.left;
-        })[0]?.closest('button,[role="button"],[role="option"]') || null;
+        });
+      return candidates[0] ? clickableResult(candidates[0]) : null;
     }, 30000, "thumbnail mới nhất trong Tệp tải lên");
     await clickLikeUser(newestUpload);
   }
