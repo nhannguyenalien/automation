@@ -30,6 +30,8 @@ services:
       S3_MANAGE_BUCKET: ${S3_MANAGE_BUCKET:-false}
     expose:
       - "8787"
+    ports:
+      - "8787:8787"
 
   chrome:
     build:
@@ -53,6 +55,8 @@ services:
       - chrome-profile:/data/chromium
     expose:
       - "6080"
+    ports:
+      - "6080:6080"
 
 volumes:
   chrome-profile:
