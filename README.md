@@ -2,7 +2,7 @@
 
 ## Deploy trên Coolify
 
-Repository có sẵn stack hai container trong `docker-compose.coolify.yml`: backend Node.js và Chromium worker có extension, Xvfb/noVNC cùng volume giữ phiên đăng nhập Google. Xem hướng dẫn cấu hình secrets, domain và đăng nhập lần đầu tại [`docs/COOLIFY.md`](docs/COOLIFY.md).
+Repository có sẵn stack hai container trong `docker-compose.coolify.yml`: backend Node.js và Google Chrome Stable worker có extension, Xvfb/noVNC cùng volume giữ phiên đăng nhập Google. Xem hướng dẫn cấu hình secrets, domain và đăng nhập lần đầu tại [`docs/COOLIFY.md`](docs/COOLIFY.md).
 
 Dịch vụ nội bộ nhận job qua HTTP API và dùng Chrome đã đăng nhập để điều khiển Google Flow và Gemini. Extension hiện hỗ trợ tạo ảnh, video và chat:
 

@@ -8,8 +8,12 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FLOW_EXTENSION_FORCE_CONFIG=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      chromium fonts-liberation fonts-noto-color-emoji jq novnc openbox \
-      procps websockify x11vnc xvfb ca-certificates \
+      ca-certificates fonts-liberation fonts-noto-color-emoji jq novnc openbox \
+      procps wget websockify x11vnc xvfb \
+    && wget -q -O /tmp/google-chrome.deb \
+      https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+    && apt-get install -y --no-install-recommends /tmp/google-chrome.deb \
+    && rm -f /tmp/google-chrome.deb \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 --shell /bin/bash chrome \
     && mkdir -p /data/chromium /opt/flow-extension \
@@ -23,5 +27,5 @@ USER chrome
 WORKDIR /home/chrome
 EXPOSE 6080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD pgrep -x chromium >/dev/null && pgrep -f websockify >/dev/null || exit 1
+  CMD pgrep -f google-chrome >/dev/null && pgrep -f websockify >/dev/null || exit 1
 ENTRYPOINT ["/usr/local/bin/chrome-entrypoint"]

@@ -34,7 +34,7 @@ vnc_pid=$!
 websockify --web=/usr/share/novnc 6080 localhost:5900 &
 novnc_pid=$!
 
-chromium \
+google-chrome-stable \
   --no-sandbox \
   --disable-dev-shm-usage \
   --disable-gpu \
