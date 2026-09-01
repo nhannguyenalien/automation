@@ -296,16 +296,34 @@ function buttonWithLabel(pattern) {
   });
 }
 
-async function attachReference(dataUrl) {
+function videoStartFrameControl() {
+  return deepElements('button,[role="button"],label,div,span,p')
+    .filter(el => {
+      if (!visible(el) || !/^(?:Bắt đầu|Start)$/i.test(labelText(el))) return false;
+      const rect = el.getBoundingClientRect();
+      // The start-frame slot belongs to the bottom composer. Exclude sidebar
+      // labels and historical media cards that can contain the same wording.
+      return rect.top > window.innerHeight * 0.5 && rect.width <= 300 && rect.height <= 140;
+    })
+    .sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return br.top - ar.top || (ar.width * ar.height) - (br.width * br.height);
+    })[0] || null;
+}
+
+async function attachReference(dataUrl, type = "image") {
   const response = await fetch(dataUrl);
   const blob = await response.blob();
   const extension = blob.type.includes("png") ? "png" : blob.type.includes("webp") ? "webp" : "jpg";
   const filename = `reference-${Date.now()}.${extension}`;
 
   const addButton = await waitFor(
-    () => buttonWithLabel(/^(?:add(?:_2)?\s*)?(?:Tạo|Add media|Thêm nội dung nghe nhìn)$/i),
+    () => type === "video"
+      ? videoStartFrameControl()
+      : buttonWithLabel(/^(?:add(?:_2)?\s*)?(?:Tạo|Add media|Thêm nội dung nghe nhìn)$/i),
     60000,
-    "nút + cạnh ô prompt"
+    type === "video" ? "ô Bắt đầu của khung hình video" : "nút + cạnh ô prompt"
   ).catch(() => null);
   if (!addButton) {
     const visibleButtons = deepElements('button,[role="button"]')
@@ -314,12 +332,12 @@ async function attachReference(dataUrl) {
       .map(el => `${el.getAttribute("aria-label") || ""} ${text(el)}`.trim())
       .filter(Boolean)
       .join(" | ");
-    throw new Error(`Không tìm thấy nút + cạnh ô prompt tại ${location.href}. Các nút: ${visibleButtons || "(không có)"}`);
+    throw new Error(`Không tìm thấy ${type === "video" ? "ô Bắt đầu" : "nút + cạnh ô prompt"} tại ${location.href}. Các nút: ${visibleButtons || "(không có)"}`);
   }
   await clickLikeUser(addButton);
   await sleep(500);
 
-  const initialDialog = referenceDialog();
+  const initialDialog = await waitFor(referenceDialog, 10000, "hộp chọn ảnh tham chiếu");
   const previewFingerprint = modal => {
     if (!modal) return "";
     return [...modal.querySelectorAll("img")]
@@ -369,6 +387,10 @@ async function attachReference(dataUrl) {
 
   if (uploadState?.option) {
     await clickLikeUser(uploadState.option);
+    await sleep(750);
+    // In the current Flow frame picker, clicking a media option can attach it
+    // immediately and close the dialog. There is then no Add-to-prompt button.
+    if (!referenceDialog()) return;
   } else if (!uploadState?.selected) {
     const uploadsTab = await waitFor(
       () => {
@@ -410,6 +432,8 @@ async function attachReference(dataUrl) {
       return candidates[0] ? clickableResult(candidates[0]) : null;
     }, 30000, "thumbnail mới nhất trong Tệp tải lên");
     await clickLikeUser(newestUpload);
+    await sleep(750);
+    if (!referenceDialog()) return;
   }
 
   const addToPrompt = await waitFor(() => {
@@ -633,7 +657,7 @@ async function generate(task) {
     expectedOutputs,
     Boolean(task.referenceImageDataUrl)
   );
-  if (task.referenceImageDataUrl) await attachReference(task.referenceImageDataUrl);
+  if (task.referenceImageDataUrl) await attachReference(task.referenceImageDataUrl, task.type);
   // Uploading/closing the media picker can replace Flow's editor node. Always
   // resolve it again afterwards and choose the lowest visible editor on page.
   const editor = await waitFor(() => [...document.querySelectorAll('[contenteditable="true"]')]

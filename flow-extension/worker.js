@@ -71,11 +71,21 @@ async function flowTab(projectUrl, type) {
     throw new Error(`projectUrl phải là URL project Flow, hiện nhận được: ${projectUrl}`);
   }
   const requestedPath = requested.origin + requested.pathname;
+  let targetPath = requestedPath;
   const projectPath = requested.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
   const ownKey = type === "video" ? "flowVideoTabId" : "flowImageTabId";
   const otherKey = type === "video" ? "flowImageTabId" : "flowVideoTabId";
-  const createDedicatedTab = async () => {
-    const created = await chrome.tabs.create({ url: projectUrl, active: true });
+  const projectRoot = candidate => {
+    try {
+      const current = new URL(candidate?.url || candidate);
+      const rootPath = current.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
+      return rootPath ? `${current.origin}${rootPath}` : null;
+    } catch {
+      return null;
+    }
+  };
+  const createDedicatedTab = async (url = projectUrl) => {
+    const created = await chrome.tabs.create({ url, active: true });
     await chrome.storage.local.set({ [ownKey]: created.id });
     return created;
   };
@@ -89,26 +99,36 @@ async function flowTab(projectUrl, type) {
   let tab;
   try {
     const saved = await chrome.storage.local.get([ownKey, otherKey]);
-    const isRequestedProject = candidate => {
-      if (!candidate?.url) return false;
-      try {
-        const current = new URL(candidate.url);
-        return current.origin === requested.origin &&
-          (current.pathname === projectPath || current.pathname.startsWith(`${projectPath}/`));
-      } catch {
-        return false;
-      }
-    };
+    const isRequestedProject = candidate => projectRoot(candidate) === `${requested.origin}${projectPath}`;
     const savedTab = saved[ownKey]
       ? await chrome.tabs.get(saved[ownKey]).catch(() => null)
       : null;
+    const tabs = await chrome.tabs.query({ url: "https://labs.google/fx/*" });
+    const availableProjectTab = tabs.find(candidate =>
+      candidate.id !== saved[otherKey] && projectRoot(candidate)
+    );
+    const reusableProjectTab = projectRoot(savedTab) && savedTab.id !== saved[otherKey]
+      ? savedTab
+      : availableProjectTab;
+
     if (isRequestedProject(savedTab)) {
       // A completed inspection leaves the SPA at /edit/<asset>. Always return
       // the lane's one dedicated tab to the gallery before starting a job.
       tab = await chrome.tabs.update(savedTab.id, { url: projectUrl, active: true }).catch(() => null);
+    } else if (reusableProjectTab) {
+      // FLOW_PROJECT_URL can become stale after a project is deleted or when
+      // Chrome is signed into another account. Prefer a real project already
+      // open in this Chrome profile and remember its tab for subsequent jobs.
+      // This keeps the worker operational without baking a project id into the
+      // extension or requiring every API caller to send projectUrl.
+      const reusableUrl = projectRoot(reusableProjectTab);
+      tab = await chrome.tabs.update(reusableProjectTab.id, { url: reusableUrl, active: true }).catch(() => null);
+      if (tab) {
+        targetPath = reusableUrl;
+        await chrome.storage.local.set({ [ownKey]: tab.id, flowResolvedProjectUrl: reusableUrl });
+      }
     }
     if (!tab) {
-      const tabs = await chrome.tabs.query({ url: "https://labs.google/fx/*" });
       const projectUnused = tabs.find(candidate => isRequestedProject(candidate) && candidate.id !== saved[otherKey]);
       if (projectUnused) {
         tab = await chrome.tabs.update(projectUnused.id, { url: projectUrl, active: true }).catch(() => null);
@@ -139,7 +159,7 @@ async function flowTab(projectUrl, type) {
     }
     const currentLocation = current.url ? new URL(current.url) : null;
     const isRequestedPage = currentLocation &&
-      currentLocation.origin + currentLocation.pathname === requestedPath;
+      currentLocation.origin + currentLocation.pathname === targetPath;
     if (isRequestedPage && current.status === "complete") return current;
     await new Promise(resolve => setTimeout(resolve, 500));
   }
@@ -533,8 +553,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               });
               continue;
             }
+            const isLetter = /^[a-z]$/i.test(character);
+            const isDigit = /^\d$/.test(character);
+            const code = character === " " ? "Space" :
+              isLetter ? `Key${character.toUpperCase()}` :
+              isDigit ? `Digit${character}` : "";
+            const virtualKey = character === " " ? 32 :
+              isLetter ? character.toUpperCase().charCodeAt(0) :
+              isDigit ? character.charCodeAt(0) : 0;
+            // A lone CDP `char` event paints text but is not sufficient for
+            // every Flow editor build. Mirror a physical key press exactly:
+            // keydown -> char -> keyup for every character (including Space).
+            await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+              type: "rawKeyDown", key: character === " " ? " " : character,
+              code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey
+            });
             await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
               type: "char", text: character, unmodifiedText: character
+            });
+            await chrome.debugger.sendCommand(target, "Input.dispatchKeyEvent", {
+              type: "keyUp", key: character === " " ? " " : character,
+              code, windowsVirtualKeyCode: virtualKey, nativeVirtualKeyCode: virtualKey
             });
           }
         } else if (message.type === "CLICK_POINT") {
