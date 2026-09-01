@@ -441,8 +441,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       };
       chrome.debugger.onEvent.addListener(onDebuggerEvent);
       try {
-        // Intercept and explicitly accept the chooser. Merely assigning a file
-        // to an arbitrary input can leave macOS's native dialog open forever.
+        // Intercept the chooser before clicking so macOS never opens its native
+        // dialog. CDP exposes the exact input as backendNodeId; assigning files
+        // to that node also completes the chooser.
         await chrome.debugger.sendCommand(target, "Page.setInterceptFileChooserDialog", { enabled: true });
         const point = { x: message.x, y: message.y, button: "left", clickCount: 1 };
         await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
@@ -454,23 +455,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           new Promise(resolve => setTimeout(() => resolve(null), 5000))
         ]);
         if (chooser) {
-          await chrome.debugger.sendCommand(target, "Page.handleFileChooser", {
-            action: "accept",
+          if (!chooser.backendNodeId) throw new Error("Flow mở file chooser nhưng Chrome không trả backendNodeId");
+          await chrome.debugger.sendCommand(target, "DOM.setFileInputFiles", {
             files: [localPath],
-            ...(chooser.backendNodeId ? { backendNodeId: chooser.backendNodeId } : {})
+            backendNodeId: chooser.backendNodeId
           });
           return { ok: true, filename: localPath };
         }
 
-        // Some Chrome builds do not forward fileChooserOpened to extension
-        // debuggers. First try accepting the pending chooser directly, then
-        // fall back to the live input created by Flow.
-        const acceptedPendingChooser = await chrome.debugger.sendCommand(target, "Page.handleFileChooser", {
-          action: "accept",
-          files: [localPath]
-        }).then(() => true).catch(() => false);
-        if (acceptedPendingChooser) return { ok: true, filename: localPath };
-
+        // Fallback for Chrome builds that do not forward fileChooserOpened to
+        // extension debuggers: locate the live input created by Flow.
         let fileNodeId = 0;
         const chooserStarted = Date.now();
         while (Date.now() - chooserStarted < 15000 && !fileNodeId) {
@@ -484,7 +478,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (!fileNodeId) throw new Error("Không tìm thấy input file của Flow sau khi mở hộp chọn file");
         await chrome.debugger.sendCommand(target, "DOM.setFileInputFiles", { files: [localPath], nodeId: fileNodeId });
-        await chrome.debugger.sendCommand(target, "Page.handleFileChooser", { action: "cancel" }).catch(() => {});
         return { ok: true, filename: localPath };
       } finally {
         chrome.debugger.onEvent.removeListener(onDebuggerEvent);
