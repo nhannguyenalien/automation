@@ -280,6 +280,26 @@ async function attachReference(dataUrl) {
   await clickLikeUser(addButton);
   await sleep(500);
 
+  const initialDialog = referenceDialog();
+  const previewFingerprint = modal => {
+    if (!modal) return "";
+    return [...modal.querySelectorAll("img")]
+      .filter(el => {
+        if (!visible(el)) return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width >= 220 && rect.height >= 120;
+      })
+      .sort((a, b) => {
+        const ar = a.getBoundingClientRect();
+        const br = b.getBoundingClientRect();
+        return (br.width * br.height) - (ar.width * ar.height);
+      })
+      .map(el => el.currentSrc || el.src || "")
+      .filter(Boolean)
+      .join("|");
+  };
+  const previewBeforeUpload = previewFingerprint(initialDialog);
+
   const uploadButton = await waitFor(() => buttonWithLabel(/(?:Tải nội dung nghe nhìn lên|Upload media)/i), 10000, "nút tải ảnh lên");
   uploadButton.scrollIntoView({ block: "center", inline: "center" });
   await sleep(150);
@@ -300,10 +320,50 @@ async function attachReference(dataUrl) {
   const consent = await waitFor(() => buttonWithLabel(/^(?:Tôi đồng ý|I agree)$/i), 5000, "xác nhận upload").catch(() => null);
   if (consent) await clickLikeUser(consent);
 
-  const uploadedOption = await waitFor(() => {
-    return deepElements('[role="option"],button').find(el => visible(el) && text(el).includes(filename));
-  }, 60000, "ảnh vừa upload trong thư viện");
-  await clickLikeUser(uploadedOption);
+  // New Flow builds no longer expose the local filename in the media card.
+  // A successful upload normally auto-selects the new image and changes the
+  // large preview. Keep filename matching for older builds, then fall back to
+  // the Uploads collection and its newest thumbnail.
+  const uploadState = await waitFor(() => {
+    const modal = referenceDialog();
+    const byFilename = modal && [...modal.querySelectorAll('[role="option"],button')]
+      .find(el => visible(el) && text(el).includes(filename));
+    if (byFilename) return { option: byFilename };
+    const previewAfterUpload = previewFingerprint(modal);
+    if (previewAfterUpload && previewAfterUpload !== previewBeforeUpload) return { selected: true };
+    return null;
+  }, 30000, "ảnh vừa upload trong thư viện").catch(() => null);
+
+  if (uploadState?.option) {
+    await clickLikeUser(uploadState.option);
+  } else if (!uploadState?.selected) {
+    const uploadsTab = await waitFor(
+      () => buttonWithLabel(/^(?:Tệp tải lên|Uploads?)$/i),
+      10000,
+      "mục Tệp tải lên"
+    );
+    await clickLikeUser(uploadsTab);
+    await sleep(700);
+
+    const newestUpload = await waitFor(() => {
+      const modal = referenceDialog();
+      if (!modal) return null;
+      const modalRect = modal.getBoundingClientRect();
+      return [...modal.querySelectorAll("img")]
+        .filter(el => {
+          if (!visible(el)) return false;
+          const rect = el.getBoundingClientRect();
+          return rect.width >= 32 && rect.height >= 32 && rect.width <= 200 &&
+            rect.left < modalRect.left + modalRect.width * 0.55;
+        })
+        .sort((a, b) => {
+          const ar = a.getBoundingClientRect();
+          const br = b.getBoundingClientRect();
+          return ar.top - br.top || ar.left - br.left;
+        })[0]?.closest('button,[role="button"],[role="option"]') || null;
+    }, 30000, "thumbnail mới nhất trong Tệp tải lên");
+    await clickLikeUser(newestUpload);
+  }
 
   const addToPrompt = await waitFor(() => {
     // Material icons can be included in innerText before the translated label,
