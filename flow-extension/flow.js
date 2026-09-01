@@ -68,6 +68,45 @@ async function readFlowMediaBlob(url, timeout = 60000) {
   });
 }
 
+async function uploadFlowReferenceFile(uploadButton, dataUrl, filename, timeout = 30000) {
+  const id = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    let armed = false;
+    const timer = setTimeout(() => {
+      window.removeEventListener("message", receive);
+      reject(new Error("Flow không nhận ảnh tham chiếu sau 30 giây"));
+    }, timeout);
+    async function receive(event) {
+      if (event.source !== window || event.data?.id !== id) return;
+      if (event.data.type === "FLOW_UPLOAD_FILE_ARMED") {
+        if (!event.data.ok) {
+          clearTimeout(timer);
+          window.removeEventListener("message", receive);
+          reject(new Error(event.data.error || "Không chuẩn bị được ảnh tham chiếu"));
+          return;
+        }
+        if (armed) return;
+        armed = true;
+        try {
+          await clickLikeUser(uploadButton);
+        } catch (error) {
+          clearTimeout(timer);
+          window.removeEventListener("message", receive);
+          reject(error);
+        }
+        return;
+      }
+      if (event.data.type !== "FLOW_UPLOAD_FILE_RESULT") return;
+      clearTimeout(timer);
+      window.removeEventListener("message", receive);
+      if (event.data.ok) resolve(true);
+      else reject(new Error(event.data.error || "Flow không nhận file ảnh tham chiếu"));
+    }
+    window.addEventListener("message", receive);
+    window.postMessage({ type: "FLOW_ARM_FILE_UPLOAD", id, dataUrl, filename }, "*");
+  });
+}
+
 async function uploadFlowVideo(task, mediaUrl) {
   const { buffer, contentType: reported } = await readFlowMediaBlob(mediaUrl);
   const contentType = String(reported || "").split(";")[0].trim().toLowerCase() === "video/webm"
@@ -306,20 +345,9 @@ async function attachReference(dataUrl) {
   );
 
   const uploadButton = await waitFor(() => buttonWithLabel(/(?:Tải nội dung nghe nhìn lên|Upload media)/i), 10000, "nút tải ảnh lên");
-  uploadButton.scrollIntoView({ block: "center", inline: "center" });
-  await sleep(150);
-  const rect = uploadButton.getBoundingClientRect();
-  // This menu opens a native file chooser and only creates its file input at
-  // click time. Let the extension worker intercept that chooser through CDP
-  // and provide a real local file, exactly like a manual selection.
-  const upload = await chrome.runtime.sendMessage({
-    type: "UPLOAD_FILE_POINT",
-    x: Math.round(rect.left + rect.width / 2),
-    y: Math.round(rect.top + rect.height / 2),
-    dataUrl,
-    filename
-  });
-  if (!upload?.ok) throw new Error(upload?.error || "Flow không nhận file ảnh tham chiếu");
+  // Arm the MAIN-world picker interceptor before clicking. This supplies the
+  // File to Flow without ever opening the native macOS chooser.
+  await uploadFlowReferenceFile(uploadButton, dataUrl, filename);
 
   // Flow shows this consent only on the first upload for a Google account.
   const consent = await waitFor(() => buttonWithLabel(/^(?:Tôi đồng ý|I agree)$/i), 5000, "xác nhận upload").catch(() => null);

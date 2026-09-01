@@ -112,7 +112,15 @@ Kết quả mong đợi:
 8. Giữ Worker ID mặc định, bật **Bật worker**, rồi bấm **Lưu và kiểm tra ngay**.
 9. Mở hai tab Google Flow cùng project và một tab `https://gemini.google.com/app`; đăng nhập cùng profile Chrome. Extension giữ riêng một tab ở sidebar **Hình ảnh** và một tab ở sidebar **Video**. Nếu mới mở một tab Flow, extension sẽ tự tạo tab thứ hai khi có job thuộc lane còn lại.
 
-Sau mỗi lần sửa source extension, bấm **Reload** tại `chrome://extensions`. Worker có thể tự reload tab Flow/Gemini nếu content script chưa được inject; refresh tab đang mở một lần nếu muốn kiểm tra bản mới ngay.
+Trên máy cài thủ công, sau mỗi lần sửa source extension, bấm **Reload** tại `chrome://extensions`.
+
+Trên Windows VM cài bằng `vm-setup/setup.cmd`, Scheduled Task **FlowWorker Auto Update** kiểm tra nhánh `main` mỗi 5 phút. Khi có commit mới, máy tự tải source, giữ nguyên `runtime-config.js`, rồi restart Chrome để extension chạy bản mới. Nhật ký nằm tại `C:\FlowWorkerUpdater\update.log`. Có thể cập nhật ngay bằng:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\FlowWorkerUpdater\update-extension.ps1
+```
+
+Worker có thể tự reload tab Flow/Gemini nếu content script chưa được inject; refresh tab đang mở một lần nếu muốn kiểm tra bản mới ngay.
 
 ### 4. Tạo một ảnh từ text
 
