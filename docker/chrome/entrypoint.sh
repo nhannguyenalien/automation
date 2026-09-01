@@ -1,6 +1,14 @@
 #!/bin/sh
 set -eu
 
+# Docker initializes a new named volume as root. Fix its ownership once, then
+# run every desktop process as the unprivileged Chrome user.
+if [ "$(id -u)" = "0" ]; then
+  mkdir -p /data/chromium
+  chown -R chrome:chrome /data/chromium /opt/flow-extension
+  exec gosu chrome "$0" "$@"
+fi
+
 api_url=${FLOW_EXTENSION_API_URL:-http://backend:8787}
 api_key=${FLOW_API_KEY:-}
 worker_id=${FLOW_EXTENSION_WORKER_ID:-coolify-chrome}
