@@ -26,6 +26,13 @@ jq -n \
   | sed '1s/^/export const runtimeDefaults = /; $s/$/;/' \
   > /opt/flow-extension/runtime-config.js
 
+# Container hostnames change on every Coolify deployment. Chrome leaves these
+# process locks in the persistent profile after a container is replaced, which
+# makes the next Chrome process incorrectly conclude the profile is in use.
+rm -f /data/chromium/SingletonLock \
+  /data/chromium/SingletonSocket \
+  /data/chromium/SingletonCookie
+
 cleanup() {
   kill ${chrome_pid:-} ${novnc_pid:-} ${vnc_pid:-} ${wm_pid:-} ${xvfb_pid:-} 2>/dev/null || true
 }
