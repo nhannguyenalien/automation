@@ -339,7 +339,7 @@ async function openFlowSection(type) {
   // after opening the composer's settings popover.
 }
 
-async function configure(ratio, type = "image", model = null, outputs = 1) {
+async function configure(ratio, type = "image", model = null, outputs = 1, hasReferenceImage = false) {
   // The selected-mode button renders its model, ratio icon and count on
   // separate lines (for example `Nano Banana 2\ncrop_16_9\nx1`). A normal
   // dot does not cross those line breaks, so use an explicit any-character
@@ -430,13 +430,18 @@ async function configure(ratio, type = "image", model = null, outputs = 1) {
   }
 
   if (type === "video") {
-    // `Khung hình` expects start/end frames. Text-to-video must use the
-    // component/ingredients mode so a plain prompt can be submitted alone.
-    const components = await ensureMenuControl(
-      /(?:^|\s)(?:Thành phần|Ingredients|Components)\s*$/i,
-      "chế độ text-to-video Thành phần"
+    // Text-to-video uses Thành phần. When a reference image is present, use
+    // Khung hình so Flow treats it as the starting frame (an end frame is not
+    // required). This exact branch was verified manually with Veo 3.1 Lite.
+    const generationMode = await ensureMenuControl(
+      hasReferenceImage
+        ? /(?:^|\s)(?:Khung hình|Frames?)\s*$/i
+        : /(?:^|\s)(?:Thành phần|Ingredients|Components)\s*$/i,
+      hasReferenceImage
+        ? "chế độ image-to-video Khung hình"
+        : "chế độ text-to-video Thành phần"
     );
-    await clickLikeUser(components);
+    await clickLikeUser(generationMode);
     await sleep(400);
   }
 
@@ -446,8 +451,8 @@ async function configure(ratio, type = "image", model = null, outputs = 1) {
   await sleep(400);
 
   if (type === "video" && model === "veo-3.1-lite") {
-    // Follow the order confirmed manually in Flow: Video -> Thành phần ->
-    // ratio -> model -> x1. Selecting x1 closes the popover, so choose the
+    // Follow the order confirmed manually in Flow: Video -> generation mode
+    // -> ratio -> model -> x1. Selecting x1 closes the popover, so choose the
     // model first and make x1 the final menu action.
     const modelButton = await ensureMenuControl(/Veo\s*(?:2|3)(?:\.\d+)?/i, "nút chọn model Veo");
     if (!/Veo\s*3\.1\s*[-–—]?\s*(?:Lite|Nhanh)/i.test(labelText(modelButton))) {
@@ -514,7 +519,13 @@ async function generate(task) {
   const expectedOutputs = task.type === "image" ? Math.max(1, Math.min(4, Number(task.outputs || 1))) : 1;
   const recoverExistingImage = task.type === "image" && Number(task.attempt || 1) > 1;
   await openFlowSection(task.type);
-  await configure(task.ratio, task.type, task.model, expectedOutputs);
+  await configure(
+    task.ratio,
+    task.type,
+    task.model,
+    expectedOutputs,
+    Boolean(task.referenceImageDataUrl)
+  );
   if (task.referenceImageDataUrl) await attachReference(task.referenceImageDataUrl);
   // Uploading/closing the media picker can replace Flow's editor node. Always
   // resolve it again afterwards and choose the lowest visible editor on page.

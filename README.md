@@ -15,7 +15,7 @@ Dịch vụ nội bộ nhận job qua HTTP API và dùng Chrome đã đăng nh�
 - Gemini Chat một prompt hoặc batch tuần tự;
 - mặc định chủ động chọn Gemini 3.5 Flash Lite, hoặc chọn Gemini 3.1 Pro với `model: "3.1-pro"`;
 - trả nội dung trả lời và URL cuộc hội thoại qua API.
-- text-to-video 720p bằng Veo 3.1 Lite, không cần ảnh đầu/cuối, chạy tuần tự và trả public S3 URL.
+- text-to-video và image-to-video 720p bằng Veo 3.1 Lite, chạy tuần tự và trả public S3 URL.
 
 Đây là browser automation, không phải Gemini API chính thức. Giao diện Google Flow thay đổi có thể làm selector cần cập nhật. Chỉ sử dụng với tài khoản và hạn mức mà bạn được phép dùng; không dùng để vượt quota, CAPTCHA hoặc cơ chế chống lạm dụng.
 
@@ -41,6 +41,10 @@ Ngày 31/08/2026 trên Chrome/macOS:
 - Gemini Chat với model `3.1-pro`: hoạt động;
 - API nhận được nội dung trả lời và URL cuộc hội thoại.
 - text-to-video Veo 3.1 Lite: đã xác nhận thủ công toàn bộ luồng tạo video 8 giây và tải được file MP4 thật; extension nhập prompt bằng sự kiện phím thật từng ký tự vì Flow không chấp nhận chèn DOM/bulk input.
+
+Ngày 01/09/2026 trên Chrome/macOS:
+
+- image-to-video Veo 3.1 Lite: đã xác nhận thủ công luồng ảnh đầu + prompt, không cần ảnh cuối; video xuất hiện trong thư viện và mở được trang chi tiết với media video riêng.
 
 Luồng tiếp tục một cuộc hội thoại bằng `newConversation: false` và `chatUrl` đã được triển khai, nhưng chưa có smoke test riêng trong phiên kiểm thử trên.
 
@@ -220,6 +224,24 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
 Image-to-image cũng hỗ trợ `outputs: 1..4` giống text-to-image. Bỏ field này thì mỗi prompt chỉ tạo một ảnh.
 
 Ảnh tham chiếu hiện chỉ hỗ trợ `worker: "extension"`.
+
+### 8. Image-to-video từ file local
+
+Upload ảnh như bước image-to-image, sau đó gọi `/video` với URL nhận được:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/video \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: image-video-UNIQUE_ID' \
+  --data '{
+    "prompt": "The robotic peacock slowly spreads its glowing tail, smooth camera push in",
+    "referenceImageUrl": "http://127.0.0.1:8787/assets/ASSET_NAME.jpg",
+    "ratio": "16:9"
+  }'
+```
+
+Nếu có `referenceImageUrl`, extension chọn **Video → Khung hình** và dùng ảnh làm khung hình đầu. Nếu bỏ field này, extension chọn **Video → Thành phần** để tạo text-to-video. Mỗi prompt tạo đúng một video.
 
 ## Kết quả và public URL
 

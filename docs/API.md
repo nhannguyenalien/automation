@@ -327,7 +327,7 @@ if (job.status === "completed") {
 
 ## `POST /video`
 
-Tạo video text-to-video tuần tự bằng **Veo 3.1 Lite**, 720p, một video mỗi prompt. Endpoint này không dùng ảnh đầu hoặc ảnh cuối, luôn dùng Chrome extension và response theo contract chung `200/202`.
+Tạo video tuần tự bằng **Veo 3.1 Lite**, 720p, một video mỗi prompt. Endpoint hỗ trợ cả text-to-video và image-to-video từ một ảnh đầu, luôn dùng Chrome extension và response theo contract chung `200/202`.
 
 ```bash
 curl -sS -X POST https://nhans-macbook-pro-1.tail5d608a.ts.net/video \
@@ -345,7 +345,23 @@ curl -sS -X POST https://nhans-macbook-pro-1.tail5d608a.ts.net/video \
 
 Các field: `prompt` hoặc `prompts`, `ratio` (`16:9` hoặc `9:16`), `projectUrl`, `timeoutMs` (mặc định 600 giây), `maxRetries`. Response `200` chứa kết quả nếu đã xong; response `202` trả `id` để client poll `GET /jobs/:jobId`. Khi xong, public S3 URL nằm trong `videos[]` theo thứ tự prompt.
 
-Mỗi prompt luôn tạo đúng một video (`x1`). Extension dùng một tab Flow riêng cho video, bấm **Video** ở sidebar rồi xác nhận composer đang ở chế độ **Video**. Vì sidebar chỉ lọc thư viện chứ không đổi composer, extension sẽ chọn **Video** trong popup nếu tab mới hoặc vừa bị reset; các job sau giữ nguyên chế độ. Sau đó extension cấu hình **Thành phần → tỷ lệ → Veo 3.1 Lite → x1**, nhập prompt bằng sự kiện bàn phím thật, mở thẻ video mới, tải MP4 và upload lên S3. Client có thể gửi nhiều prompt trong một job; worker xử lý tuần tự để tránh tốn tín dụng ngoài ý muốn.
+Image-to-video dùng thêm `referenceImageUrl`. URL có thể là public HTTP(S), hoặc URL từ `POST /assets`:
+
+```bash
+curl -sS -X POST https://nhans-macbook-pro-1.tail5d608a.ts.net/video \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: image-video-UNIQUE_ID' \
+  -d '{
+    "prompt": "The robotic peacock slowly spreads its glowing tail, smooth camera push in",
+    "referenceImageUrl": "https://example.com/reference.jpg",
+    "ratio": "16:9"
+  }'
+```
+
+Một `referenceImageUrl` được dùng lại cho mọi prompt trong batch. Ảnh là khung hình đầu; ảnh cuối không bắt buộc và API hiện không nhận ảnh cuối.
+
+Mỗi prompt luôn tạo đúng một video (`x1`). Extension dùng một tab Flow riêng cho video, bấm **Video** ở sidebar rồi xác nhận composer đang ở chế độ **Video**. Vì sidebar chỉ lọc thư viện chứ không đổi composer, extension sẽ chọn **Video** trong popup nếu tab mới hoặc vừa bị reset. Text-to-video chọn **Thành phần**; image-to-video chọn **Khung hình**, upload ảnh làm khung hình đầu. Sau đó extension cấu hình tỷ lệ → Veo 3.1 Lite → x1, nhập prompt bằng sự kiện bàn phím thật, mở thẻ video mới, tải MP4 và upload lên S3. Client có thể gửi nhiều prompt trong một job; worker xử lý tuần tự để tránh tốn tín dụng ngoài ý muốn.
 
 Ví dụ kết quả video hoàn tất:
 

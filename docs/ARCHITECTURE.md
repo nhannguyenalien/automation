@@ -118,6 +118,17 @@ Các request chờ được quản lý bằng waiter theo `jobId`. `saveJob` đ�
 
 Một `referenceImageUrl` được dùng lại cho mọi prompt trong cùng job.
 
+## Luồng image-to-video
+
+1. Client upload ảnh bằng `POST /assets` hoặc cung cấp URL HTTP(S) extension truy cập được.
+2. Client gọi `POST /video` với `referenceImageUrl` và một hoặc nhiều prompt.
+3. Extension tải ảnh, mở tab Flow Video và chọn composer **Video → Khung hình**.
+4. Ảnh được thêm làm khung hình đầu; không cần khung hình cuối.
+5. Extension chọn tỷ lệ, Veo 3.1 Lite và x1, rồi gõ prompt bằng sự kiện bàn phím thật từng ký tự.
+6. Khi hoàn tất, extension mở video mới, tải MP4 và gửi binary về API để upload S3.
+
+Nếu job video không có `referenceImageUrl`, extension chọn **Video → Thành phần** và chạy luồng text-to-video hiện có. Một ảnh đầu được dùng lại cho mọi prompt trong cùng batch.
+
 ## Luồng Gemini Chat
 
 1. Client gọi `POST /chat` với một `prompt` hoặc `prompts[]` và một `Idempotency-Key` duy nhất.

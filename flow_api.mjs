@@ -649,8 +649,12 @@ const server = http.createServer(async (req, res) => {
       const timeoutMs = Math.max(120000, Number(body.timeoutMs || 600000));
       const projectUrl = body.projectUrl || process.env.FLOW_PROJECT_URL || "https://labs.google/fx/vi/tools/flow";
       const maxRetries = Math.max(0, Math.min(5, Number(body.maxRetries ?? defaultMaxRetries)));
+      const referenceImageUrl = body.referenceImageUrl ? String(body.referenceImageUrl) : null;
+      if (referenceImageUrl && !/^https?:\/\//i.test(referenceImageUrl)) {
+        return send(res, 400, { error: "referenceImageUrl phải là URL HTTP(S)" });
+      }
       const identity = idempotentIdentity(req, body, "video", {
-        prompts: prompts.map(x => x.trim()), ratio, timeoutMs, projectUrl, maxRetries
+        prompts: prompts.map(x => x.trim()), ratio, timeoutMs, projectUrl, maxRetries, referenceImageUrl
       });
       const duplicate = await findIdempotentJob(identity);
       if (duplicate?.conflict) {
@@ -663,7 +667,7 @@ const server = http.createServer(async (req, res) => {
       const id = identity?.id || `video-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
       const job = { id, type: "video", prompts: prompts.map(x => x.trim()), ratio,
         model: "veo-3.1-lite", timeoutMs, projectUrl,
-        worker: "extension", referenceImageUrl: null, status: "queued", createdAt: new Date().toISOString(),
+        worker: "extension", referenceImageUrl, status: "queued", createdAt: new Date().toISOString(),
         logs: [], images: [], results: Array(prompts.length).fill(null), attempts: Array(prompts.length).fill(0),
         maxRetries, lease: null,
         idempotencyKeyHash: identity?.keyHash || null,
