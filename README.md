@@ -120,6 +120,12 @@ Trên Windows VM cài bằng `vm-setup/setup.cmd`, Scheduled Task **FlowWorker A
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\FlowWorkerUpdater\update-extension.ps1
 ```
 
+Để bật tự cập nhật trên một VM đã cài trước đó, mở PowerShell **Run as administrator** và chạy:
+
+```powershell
+irm https://raw.githubusercontent.com/nhannguyenalien/automation/main/vm-setup/install-updater.ps1 | iex
+```
+
 Worker có thể tự reload tab Flow/Gemini nếu content script chưa được inject; refresh tab đang mở một lần nếu muốn kiểm tra bản mới ngay.
 
 ### 4. Tạo một ảnh từ text
