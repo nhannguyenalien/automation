@@ -74,6 +74,11 @@ async function flowTab(projectUrl, type) {
   const projectPath = requested.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
   const ownKey = type === "video" ? "flowVideoTabId" : "flowImageTabId";
   const otherKey = type === "video" ? "flowImageTabId" : "flowVideoTabId";
+  const createDedicatedTab = async () => {
+    const created = await chrome.tabs.create({ url: projectUrl, active: true });
+    await chrome.storage.local.set({ [ownKey]: created.id });
+    return created;
+  };
 
   // Image and video must never share one Flow tab. Serialise tab assignment
   // because the image/video lanes can both start immediately after reload.
@@ -100,26 +105,38 @@ async function flowTab(projectUrl, type) {
     if (isRequestedProject(savedTab)) {
       // A completed inspection leaves the SPA at /edit/<asset>. Always return
       // the lane's one dedicated tab to the gallery before starting a job.
-      tab = await chrome.tabs.update(savedTab.id, { url: projectUrl, active: true });
-    } else {
+      tab = await chrome.tabs.update(savedTab.id, { url: projectUrl, active: true }).catch(() => null);
+    }
+    if (!tab) {
       const tabs = await chrome.tabs.query({ url: "https://labs.google/fx/*" });
       const projectUnused = tabs.find(candidate => isRequestedProject(candidate) && candidate.id !== saved[otherKey]);
       if (projectUnused) {
-        tab = await chrome.tabs.update(projectUnused.id, { url: projectUrl, active: true });
-      } else {
+        tab = await chrome.tabs.update(projectUnused.id, { url: projectUrl, active: true }).catch(() => null);
+      }
+      if (!tab) {
         // Do not navigate a tab assigned to the other media type. A dedicated
         // second project tab preserves each sidebar section between jobs.
-        tab = await chrome.tabs.create({ url: projectUrl, active: true });
+        tab = await createDedicatedTab();
+      } else {
+        await chrome.storage.local.set({ [ownKey]: tab.id });
       }
-      await chrome.storage.local.set({ [ownKey]: tab.id });
     }
   } finally {
     releaseLock();
   }
 
   const started = Date.now();
+  let recoveryAttempts = 0;
   while (Date.now() - started < 90000) {
-    const current = await chrome.tabs.get(tab.id);
+    const current = await chrome.tabs.get(tab.id).catch(() => null);
+    if (!current) {
+      if (recoveryAttempts >= 2) {
+        throw new Error(`Tab Flow ${type} liên tục bị đóng khi đang mở project`);
+      }
+      recoveryAttempts += 1;
+      tab = await createDedicatedTab();
+      continue;
+    }
     const currentLocation = current.url ? new URL(current.url) : null;
     const isRequestedPage = currentLocation &&
       currentLocation.origin + currentLocation.pathname === requestedPath;
