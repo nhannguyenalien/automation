@@ -432,19 +432,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (!localPath) throw new Error("Lưu ảnh tham chiếu tạm quá 30 giây");
 
       await chrome.debugger.attach(target, "1.3");
+      let resolveChooser;
+      const chooserOpened = new Promise(resolve => { resolveChooser = resolve; });
+      const onDebuggerEvent = (source, method, params) => {
+        if (source.tabId === target.tabId && method === "Page.fileChooserOpened") {
+          resolveChooser(params || {});
+        }
+      };
+      chrome.debugger.onEvent.addListener(onDebuggerEvent);
       try {
-        // Suppress the operating system's native chooser. We still locate the
-        // input through DOM below because fileChooserOpened is unreliable in
-        // extension debugger sessions on some Chrome builds.
+        // Intercept and explicitly accept the chooser. Merely assigning a file
+        // to an arbitrary input can leave macOS's native dialog open forever.
         await chrome.debugger.sendCommand(target, "Page.setInterceptFileChooserDialog", { enabled: true });
         const point = { x: message.x, y: message.y, button: "left", clickCount: 1 };
         await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
         await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mousePressed", ...point });
         await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseReleased", ...point });
-        // Flow creates a hidden input at click time. On some Chrome builds the
-        // Page.fileChooserOpened event is not forwarded to extension debuggers,
-        // although the native dialog is visibly open. Query the live DOM through
-        // CDP instead; assigning the file also dismisses that native dialog.
+
+        const chooser = await Promise.race([
+          chooserOpened,
+          new Promise(resolve => setTimeout(() => resolve(null), 5000))
+        ]);
+        if (chooser) {
+          await chrome.debugger.sendCommand(target, "Page.handleFileChooser", {
+            action: "accept",
+            files: [localPath],
+            ...(chooser.backendNodeId ? { backendNodeId: chooser.backendNodeId } : {})
+          });
+          return { ok: true, filename: localPath };
+        }
+
+        // Some Chrome builds do not forward fileChooserOpened to extension
+        // debuggers. First try accepting the pending chooser directly, then
+        // fall back to the live input created by Flow.
+        const acceptedPendingChooser = await chrome.debugger.sendCommand(target, "Page.handleFileChooser", {
+          action: "accept",
+          files: [localPath]
+        }).then(() => true).catch(() => false);
+        if (acceptedPendingChooser) return { ok: true, filename: localPath };
+
         let fileNodeId = 0;
         const chooserStarted = Date.now();
         while (Date.now() - chooserStarted < 15000 && !fileNodeId) {
@@ -458,8 +484,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (!fileNodeId) throw new Error("Không tìm thấy input file của Flow sau khi mở hộp chọn file");
         await chrome.debugger.sendCommand(target, "DOM.setFileInputFiles", { files: [localPath], nodeId: fileNodeId });
+        await chrome.debugger.sendCommand(target, "Page.handleFileChooser", { action: "cancel" }).catch(() => {});
         return { ok: true, filename: localPath };
       } finally {
+        chrome.debugger.onEvent.removeListener(onDebuggerEvent);
         await chrome.debugger.sendCommand(target, "Page.setInterceptFileChooserDialog", { enabled: false }).catch(() => {});
         await chrome.debugger.detach(target).catch(() => {});
       }
