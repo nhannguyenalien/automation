@@ -90,7 +90,7 @@ google-chrome-stable \
   --no-sandbox \
   --disable-dev-shm-usage \
   --use-gl=angle \
-  --use-angle=swiftshader \
+  --use-angle=swiftshader-webgl \
   --enable-unsafe-swiftshader \
   --enable-webgl \
   --ignore-gpu-blocklist \
