@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "flow": "node flow_automation.mjs",
-    "api": "node --env-file-if-exists=.env flow_api.mjs"
+    "api": "node --env-file-if-exists=.env flow_api.mjs",
+    "test": "node --test flow-extension/*.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1121.0",

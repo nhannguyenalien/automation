@@ -8,8 +8,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FLOW_EXTENSION_FORCE_CONFIG=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates fonts-liberation fonts-noto-color-emoji gosu jq novnc openbox \
-      procps wget websockify x11vnc xvfb \
+      busybox ca-certificates fonts-liberation fonts-noto-color-emoji gosu jq novnc openbox \
+      openssl procps wget websockify x11vnc xvfb \
     && wget -q -O /tmp/google-chrome.deb \
       https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get install -y --no-install-recommends /tmp/google-chrome.deb \

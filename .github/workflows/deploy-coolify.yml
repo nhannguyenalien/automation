@@ -7,6 +7,7 @@ on:
     paths:
       - "flow-extension/**"
       - "docker/chrome/**"
+      - "Dockerfile.chrome"
       - "docker-compose.coolify.yml"
       - ".github/workflows/deploy-coolify.yml"
   workflow_dispatch:

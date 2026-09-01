@@ -1,4 +1,5 @@
 import { runtimeDefaults } from "./runtime-config.js";
+import { canRetryLane, createLaneBlock } from "./lane-recovery.js";
 
 const defaults = {
   apiUrl: runtimeDefaults.apiUrl || "http://127.0.0.1:8787",
@@ -216,10 +217,17 @@ async function poll(lane) {
     const cfg = await config();
     if (!cfg.enabled || !cfg.apiKey) return;
     const { blockedLanes = {} } = await chrome.storage.local.get("blockedLanes");
-    if (blockedLanes[lane]) return;
+    const laneBlock = blockedLanes[lane];
+    if (laneBlock && !canRetryLane(laneBlock)) return;
     const types = [lane];
     ({ task } = await api("/extension/claim", { workerId: `${cfg.workerId}-${lane}`, types }));
-    if (!task) return;
+    if (!task) {
+      if (laneBlock) {
+        const { [lane]: removed, ...remainingBlocks } = blockedLanes;
+        await chrome.storage.local.set({ blockedLanes: remainingBlocks });
+      }
+      return;
+    }
     if (task.referenceImageUrl) task.referenceImageDataUrl = await referenceDataUrl(task.referenceImageUrl);
     const tab = task.type === "chat"
       ? await geminiTab(task.chatUrl, task.newConversation && task.index === 0)
@@ -228,6 +236,11 @@ async function poll(lane) {
     const result = await chrome.tabs.sendMessage(tab.id, { type: task.type === "chat" ? "CHAT" : "GENERATE", task });
     if (!result?.ok) throw new Error(result?.error || "Content script xử lý thất bại");
     await api("/extension/result", { jobId: task.jobId, index: task.index, ...result });
+    if (laneBlock) {
+      const { blockedLanes: latestBlocks = {} } = await chrome.storage.local.get("blockedLanes");
+      const { [lane]: removed, ...remainingBlocks } = latestBlocks;
+      await chrome.storage.local.set({ blockedLanes: remainingBlocks });
+    }
   } catch (error) {
     if (task) {
       await api("/extension/result", { jobId: task.jobId, index: task.index, ok: false, error: error.message }).catch(() => {});
@@ -235,11 +248,12 @@ async function poll(lane) {
     const updates = { lastError: error.message, lastRun: new Date().toISOString() };
     if (isSystemicWorkerError(lane, error.message)) {
       const { blockedLanes = {} } = await chrome.storage.local.get("blockedLanes");
+      const nextBlock = createLaneBlock(blockedLanes[lane], error.message);
       updates.blockedLanes = {
         ...blockedLanes,
-        [lane]: { at: new Date().toISOString(), error: error.message }
+        [lane]: nextBlock
       };
-      updates.lastError = `Đã dừng lane ${lane} để bảo vệ batch: ${error.message}`;
+      updates.lastError = `Lane ${lane} tạm dừng đến ${nextBlock.retryAt}: ${error.message}`;
     }
     await chrome.storage.local.set(updates);
   } finally {
