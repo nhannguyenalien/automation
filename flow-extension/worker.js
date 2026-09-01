@@ -104,14 +104,25 @@ async function flowTab(projectUrl, type) {
       ? await chrome.tabs.get(saved[ownKey]).catch(() => null)
       : null;
     const tabs = await chrome.tabs.query({ url: "https://labs.google/fx/*" });
-    const availableProjectTab = tabs.find(candidate =>
+    const availableProjectTabs = tabs.filter(candidate =>
       candidate.id !== saved[otherKey] && projectRoot(candidate)
     );
-    const reusableProjectTab = projectRoot(savedTab) && savedTab.id !== saved[otherKey]
-      ? savedTab
-      : availableProjectTab;
+    const activeDifferentProject = availableProjectTabs.find(candidate =>
+      candidate.active && projectRoot(candidate) !== `${requested.origin}${projectPath}`
+    );
+    const reusableProjectTab = activeDifferentProject ||
+      (projectRoot(savedTab) && savedTab.id !== saved[otherKey] ? savedTab : availableProjectTabs[0]);
 
-    if (isRequestedProject(savedTab)) {
+    if (activeDifferentProject) {
+      // The project the user has visibly opened is a stronger signal than a
+      // stale configured id or a previously assigned background tab.
+      const reusableUrl = projectRoot(activeDifferentProject);
+      tab = await chrome.tabs.update(activeDifferentProject.id, { url: reusableUrl, active: true }).catch(() => null);
+      if (tab) {
+        targetPath = reusableUrl;
+        await chrome.storage.local.set({ [ownKey]: tab.id, flowResolvedProjectUrl: reusableUrl });
+      }
+    } else if (isRequestedProject(savedTab)) {
       // A completed inspection leaves the SPA at /edit/<asset>. Always return
       // the lane's one dedicated tab to the gallery before starting a job.
       tab = await chrome.tabs.update(savedTab.id, { url: projectUrl, active: true }).catch(() => null);
