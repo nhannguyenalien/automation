@@ -11,4 +11,4 @@ $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(5) -Repetiti
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries
 Register-ScheduledTask -TaskName 'FlowWorker Auto Update' -Action $action -Trigger $trigger -Settings $settings -User $env:USERNAME -RunLevel Highest -Force | Out-Null
 
-& $updater
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updater
