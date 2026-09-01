@@ -89,7 +89,11 @@ httpd_pid=$!
 google-chrome-stable \
   --no-sandbox \
   --disable-dev-shm-usage \
-  --disable-gpu \
+  --use-gl=angle \
+  --use-angle=swiftshader \
+  --enable-unsafe-swiftshader \
+  --enable-webgl \
+  --ignore-gpu-blocklist \
   --no-first-run \
   --no-default-browser-check \
   --password-store=basic \
