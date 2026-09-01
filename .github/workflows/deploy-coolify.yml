@@ -1,0 +1,32 @@
+name: Deploy extension to Coolify
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "flow-extension/**"
+      - "docker/chrome/**"
+      - "docker-compose.coolify.yml"
+      - ".github/workflows/deploy-coolify.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-coolify-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coolify deployment
+        env:
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          COOLIFY_API_URL: https://cool.toidayhoc.com/api/v1
+          COOLIFY_APPLICATION_UUID: zootqghsowlmcsbdziaawk0l
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
+            --header "Accept: application/json" \
+            "${COOLIFY_API_URL}/deploy?uuid=${COOLIFY_APPLICATION_UUID}&force=false"
