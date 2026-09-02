@@ -19,6 +19,21 @@ S3_MANAGE_BUCKET='false' \
 npm run api
 ```
 
+### Chạy bền trên máy Mac bằng LaunchAgent
+
+Máy test đã có mẫu `ops/com.schoolsai.flow-api.plist`. Cài một lần để API tự
+khởi động khi đăng nhập và tự chạy lại nếu tiến trình Node bị dừng:
+
+```bash
+mkdir -p logs
+cp ops/com.schoolsai.flow-api.plist ~/Library/LaunchAgents/
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.schoolsai.flow-api.plist
+```
+
+Kiểm tra bằng `curl http://127.0.0.1:8787/health`. Log nằm trong
+`logs/flow-api.log` và `logs/flow-api.error.log`. Khi LaunchAgent đang chạy thì
+không mở thêm `node flow_api.mjs`, nếu không sẽ gặp `EADDRINUSE`.
+
 Không đóng terminal này khi test local.
 
 ### Chrome worker
@@ -208,6 +223,10 @@ API và extension/client đang dùng khác key. Whitespace cũng được tính 
 ### `409 Task không còn lease`
 
 Extension trả kết quả quá muộn, gửi trùng, hoặc API/job đã đổi state. Không có retry endpoint; trong bản hiện tại hãy gửi job mới.
+
+### Video nối xuất hiện rồi mất sau reload
+
+Đừng coi timeline 16 giây vừa xuất hiện ngay sau khi bấm **Tạo** là hoàn tất. Chỉ dùng kết quả khi job API đã `completed`, có `flowUrl`, `videos[]` và `durationSeconds` đã tăng. Worker đợi UI render thật trước khi trả kết quả. Khi nối đoạn tiếp theo, dùng chính `flowUrl` trả về; không dùng public URL MP4/S3. Không gửi đồng thời hai job `/video/extend` cho cùng một scene.
 
 ### `404 Không tìm thấy job`
 

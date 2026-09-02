@@ -479,12 +479,28 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
   // structural (mode/model + crop icon + output count) so future model-name
   // changes do not make the whole worker unable to find its settings button.
   const expectedMode = type === "video" ? /Video|Veo/i : /Nano Banana|Imagen|Hình ảnh|Image/i;
-  const findModeButton = () => deepElements("button").find(el => {
-    const label = labelText(el);
-    if (!visible(el) || !/(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) || !/x\d/i.test(label)) return false;
-    const rect = el.getBoundingClientRect();
-    return rect.top > window.innerHeight * 0.6 && rect.width < 400 && rect.height < 100;
-  });
+  const findModeButton = () => deepElements("button")
+    .filter(el => {
+      const label = labelText(el);
+      if (!visible(el)) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.top <= window.innerHeight * 0.6 || rect.width >= 400 || rect.height >= 100) return false;
+
+      // Older Flow builds display model + ratio + output count here. The
+      // current UI can instead start a project in the generic `Tác nhân`
+      // (Agent) composer, which only renders that short label. Clicking this
+      // same bottom-composer button opens the media-type picker, so accept it
+      // as a mode button and let the branch below switch it to Image/Video.
+      const configured = /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) && /x\d/i.test(label);
+      const genericAgent = /^(?:Tác nhân|Agent)$/i.test(label.trim());
+      return configured || genericAgent;
+    })
+    // Prefer the fully configured control if both an old hidden-ish control
+    // and the new Agent button are mounted during a Flow transition.
+    .sort((a, b) => {
+      const configured = el => /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(labelText(el)) && /x\d/i.test(labelText(el));
+      return Number(configured(b)) - Number(configured(a));
+    })[0] || null;
   const findModeMenu = () => deepElements('[role="menu"],[role="dialog"],[role="listbox"],div')
     .filter(el => {
       const label = labelText(el);
@@ -646,7 +662,119 @@ function visibleFlowError() {
   return null;
 }
 
+function flowDurationSeconds() {
+  const values = [...document.querySelectorAll("body *")]
+    .filter(visible)
+    .map(element => text(element))
+    .filter(value => /^\d{2}:\d{2}:\d{2}$/.test(value))
+    .map(value => {
+      const [minutes, seconds, frames] = value.split(":").map(Number);
+      return minutes * 60 + seconds + frames / 30;
+    });
+  return values.length ? Math.max(...values) : 0;
+}
+
+async function extendVideo(task) {
+  if (!/\/tools\/flow\/project\/[^/]+\/scene\/[^/]+/.test(location.pathname)) {
+    throw new Error(`Video nối tiếp cần URL scene Flow, hiện đang ở ${location.href}`);
+  }
+  const sourceDuration = await waitFor(() => {
+    const duration = flowDurationSeconds();
+    return duration >= 1 ? duration : null;
+  }, 60000, "thời lượng video nguồn");
+
+  const addClip = await waitFor(() => deepElements('button,[role="button"]')
+    .filter(element => visible(element) && /(?:Thêm đoạn trích video|Add video clip)/i.test(labelText(element)))
+    .sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return (ar.width * ar.height) - (br.width * br.height);
+    })[0] || null, 30000, "nút Thêm đoạn trích video");
+  await clickLikeUser(addClip);
+  await waitAndClickByText(
+    /(?:Kéo dài|Extend).*Veo\s*3\.1.*(?:Lite|Nhanh)/i,
+    'button,[role="button"],[role="menuitem"],[role="option"]',
+    15000,
+    "Kéo dài (Veo 3.1 Lite)"
+  );
+  await sleep(800);
+
+  const editor = await waitFor(() => [...document.querySelectorAll('[contenteditable="true"]')]
+    .filter(visible)
+    .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0], 30000, "ô prompt nối video");
+  await inputLikeUser(editor, task.prompt);
+  const submit = await waitFor(() => findSubmit(editor), 20000, "nút Tạo video nối (Flow chưa ghi nhận prompt)");
+  await clickLikeUser(submit);
+
+  const generationStartedAt = Date.now();
+  const finalDuration = await waitFor(() => {
+    const flowError = visibleFlowError();
+    if (flowError) throw new Error(`Google Flow: ${flowError}`);
+    const duration = flowDurationSeconds();
+    const saveFrame = buttonWithLabel(/(?:Lưu khung hình|Save frame)/i);
+    const promptAccepted = normalizedPrompt(document.body.innerText).includes(normalizedPrompt(task.prompt));
+    // Flow immediately paints a provisional 16-second timeline. Do not accept
+    // it until generation has had time to finish and the real save-frame UI is
+    // back; this is the exact distinction verified manually across reloads.
+    if (Date.now() - generationStartedAt < 55000 || !saveFrame || !promptAccepted || duration <= sourceDuration + 1) return null;
+    return duration;
+  }, Number(task.timeoutMs || 900000), "video nối tiếp hoàn tất");
+
+  // Commit the generated continuation to the scene before the service worker
+  // reloads it for persistence verification. Flow can otherwise show a
+  // provisional timeline that disappears after navigation.
+  const doneButton = buttonWithLabel(/^(?:Xong|Done)$/i);
+  if (doneButton) {
+    await clickLikeUser(doneButton);
+    await sleep(1500);
+  }
+
+  return {
+    ok: true,
+    prepared: true,
+    flowUrl: location.href,
+    sourceDurationSeconds: Math.round(sourceDuration * 1000) / 1000,
+    durationSeconds: Math.round(finalDuration * 1000) / 1000
+  };
+}
+
+async function verifyExtendedVideo(task) {
+  if (!/\/tools\/flow\/project\/[^/]+\/scene\/[^/]+/.test(location.pathname)) {
+    throw new Error(`Không thể xác minh video nối sau reload; URL hiện tại: ${location.href}`);
+  }
+  const sourceDuration = Number(task.sourceDurationSeconds || 0);
+  const expectedDuration = Number(task.expectedDurationSeconds || sourceDuration + 2);
+  const persistedDuration = await waitFor(() => {
+    const flowError = visibleFlowError();
+    if (flowError) throw new Error(`Google Flow sau reload: ${flowError}`);
+    const duration = flowDurationSeconds();
+    const saveFrame = buttonWithLabel(/(?:Lưu khung hình|Save frame)/i);
+    if (!saveFrame || duration <= sourceDuration + 1 || duration < expectedDuration - 1) return null;
+    return duration;
+  }, 90000, "video nối vẫn tồn tại sau reload");
+
+  const outputVideo = await waitFor(() => [...document.querySelectorAll("video")]
+    .filter(element => visible(element) && (element.currentSrc || element.src))
+    .sort((a, b) => {
+      const ar = a.getBoundingClientRect();
+      const br = b.getBoundingClientRect();
+      return (br.width * br.height) - (ar.width * ar.height);
+    })[0], 60000, "video nối hoàn chỉnh để tải");
+  const downloadButton = await waitFor(() => buttonWithLabel(/(?:Tải xuống|Download)/i), 30000, "nút Tải xuống video nối");
+  await clickLikeUser(downloadButton);
+  const uploaded = await uploadFlowVideo(task, outputVideo.currentSrc || outputVideo.src);
+  return {
+    ok: true,
+    downloaded: true,
+    videoUrl: uploaded.mediaUrl,
+    objectKey: uploaded.objectKey,
+    flowUrl: location.href,
+    durationSeconds: Math.round(persistedDuration * 1000) / 1000
+  };
+}
+
 async function generate(task) {
+  if (task.type === "video" && task.mode === "extend") return extendVideo(task);
   const expectedOutputs = task.type === "image" ? Math.max(1, Math.min(4, Number(task.outputs || 1))) : 1;
   const recoverExistingImage = task.type === "image" && Number(task.attempt || 1) > 1;
   await openFlowSection(task.type);
@@ -799,6 +927,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type === "GENERATE") {
     generate(message.task).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+  if (message.type === "VERIFY_EXTENDED_VIDEO") {
+    verifyExtendedVideo(message.task).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }
 });

@@ -129,6 +129,17 @@ Một `referenceImageUrl` được dùng lại cho mọi prompt trong cùng job.
 
 Nếu job video không có `referenceImageUrl`, extension chọn **Video → Thành phần** và chạy luồng text-to-video hiện có. Một ảnh đầu được dùng lại cho mọi prompt trong cùng batch.
 
+## Luồng nối tiếp video
+
+1. Client gọi `POST /video/extend` với URL Flow `/scene/...` và một prompt.
+2. Worker khóa lane Video, mở chính xác scene nguồn và không quay về gallery dù có `FLOW_PROJECT_URL` mặc định.
+3. Content script chọn **Thêm đoạn trích video → Kéo dài (Veo 3.1 Lite)** và nhập prompt bằng chuỗi sự kiện bàn phím thật.
+4. Flow tự dùng cảnh cuối của clip hiện tại làm cảnh đầu clip mới.
+5. Script chỉ công nhận hoàn tất sau khi thời lượng tăng, UI lưu khung hình trở lại và thời gian render tối thiểu đã qua; đây là cách phân biệt timeline tạm với scene đã lưu thật.
+6. Extension tải MP4, upload S3 và trả cả `videoUrl`, `flowUrl` cùng `durationSeconds`. Client dùng `flowUrl` làm nguồn cho lần nối kế tiếp.
+
+Mỗi request chỉ nối một đoạn và mặc định không retry để tránh tạo clip trùng. Các request cho cùng một scene phải chạy tuần tự.
+
 ## Luồng Gemini Chat
 
 1. Client gọi `POST /chat` với một `prompt` hoặc `prompts[]` và một `Idempotency-Key` duy nhất.

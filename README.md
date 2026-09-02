@@ -257,6 +257,23 @@ curl -sS -X POST http://127.0.0.1:8787/video \
 
 Nếu có `referenceImageUrl`, extension chọn **Video → Khung hình** và dùng ảnh làm khung hình đầu. Nếu bỏ field này, extension chọn **Video → Thành phần** để tạo text-to-video. Mỗi prompt tạo đúng một video.
 
+### 9. Nối tiếp video Flow bằng cảnh cuối
+
+Endpoint này dùng chức năng native **Kéo dài (Veo 3.1 Lite)**. Flow tự lấy cảnh cuối của scene hiện tại làm cảnh đầu cho đoạn mới; client chỉ cần URL scene và prompt:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/video/extend \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: extend-video-UNIQUE_ID' \
+  --data '{
+    "sourceFlowUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID/scene/SCENE_ID",
+    "prompt": "The camera follows the robot into the glowing forest"
+  }'
+```
+
+`sourceFlowUrl` bắt buộc là URL `/scene/...` của Google Flow, không phải URL MP4 trên S3. Khi hoàn tất, `videos[0]` là MP4 đã upload S3, còn `flowUrl` là scene đã nối để dùng tiếp cho request kế tiếp. API mặc định không retry job nối nhằm tránh thêm trùng đoạn nếu Flow đã nhận lệnh.
+
 ## Kết quả và public URL
 
 Khi S3 được cấu hình, extension chuyển binary ảnh vừa render về API; API upload vào:

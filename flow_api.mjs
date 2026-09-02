@@ -297,11 +297,13 @@ function publicJob(job, req) {
     return urls;
   });
   const videos = (job.results || []).map(result => result?.videoUrl).filter(Boolean);
+  const flowUrls = (job.results || []).map(result => result?.flowUrl).filter(Boolean);
+  const durations = (job.results || []).map(result => Number(result?.durationSeconds)).filter(Number.isFinite);
   const localImages = job.images.map(name => `${origin}/jobs/${job.id}/images/${encodeURIComponent(name)}`);
   const responses = (job.results || []).map(result => result?.text).filter(text => typeof text === "string");
   const conversationUrls = (job.results || []).map(result => result?.conversationUrl).filter(Boolean);
   return {
-    id: job.id, type: job.type || "image", status: job.status, ratio: job.ratio,
+    id: job.id, type: job.type || "image", mode: job.mode || null, status: job.status, ratio: job.ratio,
     outputs: job.type === "image" ? (job.outputs || 1) : null,
     batchSize: job.type === "image" ? (job.batchSize || imageBatchSize) : null,
     model: job.model || null,
@@ -312,6 +314,10 @@ function publicJob(job, req) {
     attempts: job.attempts || [], maxRetries: job.maxRetries ?? defaultMaxRetries,
     images: extensionImages.length ? extensionImages : localImages,
     videos,
+    flowUrls,
+    flowUrl: flowUrls.at(-1) || null,
+    durations,
+    durationSeconds: durations.at(-1) ?? null,
     responses,
     response: responses.length === 1 ? responses[0] : null,
     conversationUrls,
@@ -690,6 +696,56 @@ const server = http.createServer(async (req, res) => {
       return sendSubmittedJob(res, job, req);
     }
 
+    if (url.pathname === "/video/extend" && req.method === "POST") {
+      const body = await readJson(req);
+      const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+      if (!prompt) return send(res, 400, { error: "Cần prompt" });
+      const sourceFlowUrl = String(body.sourceFlowUrl || "").trim();
+      let source;
+      try {
+        source = new URL(sourceFlowUrl);
+      } catch {
+        return send(res, 400, { error: "sourceFlowUrl không hợp lệ" });
+      }
+      if (source.protocol !== "https:" || source.hostname !== "labs.google" || !/\/tools\/flow\/project\/[^/]+\/scene\/[^/]+/.test(source.pathname)) {
+        return send(res, 400, { error: "sourceFlowUrl phải là URL scene Google Flow" });
+      }
+      const projectPath = source.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
+      const projectUrl = `${source.origin}${projectPath}`;
+      const timeoutMs = Math.max(180000, Number(body.timeoutMs || 900000));
+      // Retrying after Flow accepted the click can append the same clip twice,
+      // so continuation is at-most-once by default. Callers may opt in.
+      const maxRetries = Math.max(0, Math.min(5, Number(body.maxRetries ?? 0)));
+      const identity = idempotentIdentity(req, body, "video-extend", {
+        prompt, sourceFlowUrl: source.href, timeoutMs, maxRetries
+      });
+      const duplicate = await findIdempotentJob(identity);
+      if (duplicate?.conflict) return send(res, 409, { error: "Idempotency-Key đã được dùng với nội dung request khác" });
+      if (duplicate) return sendSubmittedJob(res, duplicate.job, req, { deduplicated: true });
+      if (await queuedCount() >= maxQueued) return send(res, 429, { error: `Hàng đợi đã đầy (${maxQueued} job)` });
+      const id = identity?.id || `video-extend-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+      const job = {
+        id, type: "video", mode: "extend", prompts: [prompt], ratio: null,
+        model: "veo-3.1-lite", timeoutMs, projectUrl, sourceFlowUrl: source.href,
+        worker: "extension", referenceImageUrl: null, status: "queued", createdAt: new Date().toISOString(),
+        logs: [], images: [], results: [null], attempts: [0], maxRetries, lease: null,
+        idempotencyKeyHash: identity?.keyHash || null,
+        requestFingerprint: identity?.requestFingerprint || null
+      };
+      if (identity) {
+        const created = await insertJobOnce(job);
+        if (!created) {
+          const existing = await findIdempotentJob(identity);
+          if (existing?.conflict) return send(res, 409, { error: "Idempotency-Key đã được dùng với nội dung request khác" });
+          if (existing) return sendSubmittedJob(res, existing.job, req, { deduplicated: true });
+          throw new Error("Không thể đọc lại video extend job idempotent vừa tạo");
+        }
+      } else {
+        await saveJob(job);
+      }
+      return sendSubmittedJob(res, job, req);
+    }
+
     if (url.pathname === "/extension/claim" && req.method === "POST") {
       const body = await readJson(req);
       const workerId = String(body.workerId || "chrome-worker").slice(0, 100);
@@ -702,6 +758,7 @@ const server = http.createServer(async (req, res) => {
             attempt: job.attempts?.[index] || 1,
             ratio: job.ratio, outputs: job.outputs || 1,
             projectUrl: job.projectUrl, referenceImageUrl: job.referenceImageUrl,
+            mode: job.mode || null, sourceFlowUrl: job.sourceFlowUrl || null,
             chatUrl: job.chatUrl, newConversation: job.newConversation, model: job.model,
             timeoutMs: job.timeoutMs
           }
@@ -735,7 +792,9 @@ const server = http.createServer(async (req, res) => {
             imageUrls: submittedImageUrls,
             objectKeys: Array.isArray(body.objectKeys) ? body.objectKeys.map(String) : [],
             videoUrl: body.videoUrl ? String(body.videoUrl) : null,
-            objectKey: body.objectKey ? String(body.objectKey) : null
+            objectKey: body.objectKey ? String(body.objectKey) : null,
+            flowUrl: body.flowUrl ? String(body.flowUrl) : null,
+            durationSeconds: Number.isFinite(Number(body.durationSeconds)) ? Number(body.durationSeconds) : null
           }
         : { ok: false, error: String(body.error || "Lỗi extension") };
       if (body.ok) job.results[index] = result;

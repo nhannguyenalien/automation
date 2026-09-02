@@ -380,6 +380,39 @@ Ví dụ kết quả video hoàn tất:
 }
 ```
 
+## `POST /video/extend`
+
+Nối thêm một đoạn vào scene Flow bằng **Kéo dài (Veo 3.1 Lite)**. Flow tự dùng cảnh cuối của video nguồn làm cảnh đầu của đoạn mới.
+
+```bash
+curl -sS -X POST https://nhans-macbook-pro-1.tail5d608a.ts.net/video/extend \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: video-extend-UNIQUE_ID' \
+  -d '{
+    "sourceFlowUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID/scene/SCENE_ID",
+    "prompt": "The camera follows the character through the doorway into a moonlit garden"
+  }'
+```
+
+`sourceFlowUrl` bắt buộc là URL scene Google Flow có dạng `/project/.../scene/...`; URL MP4/S3 không dùng được cho luồng native này. `prompt` là bắt buộc. `timeoutMs` mặc định 900.000 ms. `maxRetries` mặc định `0` vì retry sau khi Flow đã nhận thao tác có thể nối trùng clip.
+
+Kết quả hoàn tất:
+
+```json
+{
+  "id": "video-extend-job-id",
+  "type": "video",
+  "mode": "extend",
+  "status": "completed",
+  "videos": ["https://s3a.schoolsai.work/flow-images/jobs/video-extend-job-id/001.mp4"],
+  "flowUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID/scene/SCENE_ID",
+  "durationSeconds": 16
+}
+```
+
+Để nối nhiều đoạn, chờ job hiện tại `completed`, rồi gửi request mới với `sourceFlowUrl` bằng `flowUrl` vừa trả về. Không gửi song song hai lệnh nối cho cùng một scene.
+
 ## `GET /jobs/:jobId`
 
 ```bash

@@ -279,12 +279,36 @@ async function poll(lane) {
       return;
     }
     if (task.referenceImageUrl) task.referenceImageDataUrl = await referenceDataUrl(task.referenceImageUrl);
-    const tab = task.type === "chat"
+    let tab = task.type === "chat"
       ? await geminiTab(task.chatUrl, task.newConversation && task.index === 0)
-      : await flowTab(task.projectUrl, task.type);
+      : await flowTab(task.mode === "extend" ? task.sourceFlowUrl : task.projectUrl, task.type);
+    // flowTab normally prefers the configured project and may intentionally
+    // return to its gallery. Native video extension is different: the scene
+    // URL is the input, so always restore that exact URL before messaging the
+    // content script, even when this lane reused an older Flow tab.
+    if (task.type === "video" && task.mode === "extend") {
+      tab = await chrome.tabs.update(tab.id, { url: task.sourceFlowUrl, active: true });
+    }
     await ensureReady(tab.id);
-    const result = await chrome.tabs.sendMessage(tab.id, { type: task.type === "chat" ? "CHAT" : "GENERATE", task });
+    let result = await chrome.tabs.sendMessage(tab.id, { type: task.type === "chat" ? "CHAT" : "GENERATE", task });
     if (!result?.ok) throw new Error(result?.error || "Content script xử lý thất bại");
+    if (task.type === "video" && task.mode === "extend") {
+      if (!result.prepared || !result.flowUrl) throw new Error("Flow chưa trả về scene video nối để xác minh");
+      // A continuation is successful only when it survives a hard reload of
+      // the exact scene. This rejects Flow's provisional timeline state, which
+      // can look complete for a few seconds and then disappear.
+      await chrome.tabs.reload(tab.id);
+      await ensureReady(tab.id);
+      result = await chrome.tabs.sendMessage(tab.id, {
+        type: "VERIFY_EXTENDED_VIDEO",
+        task: {
+          ...task,
+          sourceDurationSeconds: result.sourceDurationSeconds,
+          expectedDurationSeconds: result.durationSeconds
+        }
+      });
+      if (!result?.ok) throw new Error(result?.error || "Video nối biến mất sau reload");
+    }
     await api("/extension/result", { jobId: task.jobId, index: task.index, ...result });
     if (laneBlock) {
       const { blockedLanes: latestBlocks = {} } = await chrome.storage.local.get("blockedLanes");
