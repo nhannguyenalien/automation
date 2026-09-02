@@ -139,7 +139,6 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
   -H 'Idempotency-Key: image-request-UNIQUE_ID' \
   --data '{
     "worker": "extension",
-    "projectUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID",
     "ratio": "16:9",
     "outputs": 1,
     "prompt": "A cute robot cat in Hoi An at night, cinematic"
@@ -168,7 +167,6 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
   -H 'Idempotency-Key: image-batch-UNIQUE_ID' \
   --data '{
     "worker": "extension",
-    "projectUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID",
     "ratio": "16:9",
     "prompts": [
       "A robotic peacock in a cinematic neon cyberpunk scene at night",
@@ -223,7 +221,6 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
   -H 'Idempotency-Key: image-edit-UNIQUE_ID' \
   --data '{
     "worker": "extension",
-    "projectUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID",
     "referenceImageUrl": "http://127.0.0.1:8787/assets/ASSET_NAME.jpg",
     "ratio": "16:9",
     "outputs": 1,
@@ -325,7 +322,7 @@ Nếu S3 chưa cấu hình, extension worker mới sẽ báo lỗi thay vì hoà
 | `FLOW_IMAGE_INLINE_WAIT_MS` | `2000` | Thời gian POST image chờ kết quả; tối đa 30000 |
 | `FLOW_VIDEO_INLINE_WAIT_MS` | `2000` | Thời gian POST video chờ kết quả; tối đa 30000 |
 | `FLOW_INLINE_WAIT_MS` | không đặt | Fallback chung tương thích cấu hình cũ; biến riêng theo loại được ưu tiên |
-| `FLOW_PROJECT_URL` | trang Flow chung | Project URL mặc định |
+| `FLOW_PROJECT_URL` | bắt buộc | Project URL do backend khóa cho mọi job ảnh/video; client không được chọn project |
 | `GEMINI_CHAT_URL` | `https://gemini.google.com/app` | URL Gemini mặc định; có thể là một conversation URL |
 | `FLOW_PROFILE` | `.flow-chrome-profile` | Chrome profile cho Playwright worker |
 | `S3_ENDPOINT` | rỗng | Endpoint S3-compatible, gồm `https://` |

@@ -111,7 +111,6 @@ Tạo ảnh. Dùng `prompt` cho một ảnh hoặc `prompts` cho batch; response
 | `worker` | string | không | `extension` hoặc `playwright` |
 | `ratio` | string | không | Mặc định `16:9` |
 | `outputs` | integer | không | `1`–`4`, mặc định `1`; số ảnh tạo cho mỗi prompt; giá trị lớn hơn 1 chỉ hỗ trợ extension |
-| `projectUrl` | string | nên có | URL chính xác của Flow project |
 | `referenceImageUrl` | string | không | URL HTTP(S) ảnh gốc; chỉ extension |
 | `delayMs` | number | không | Tối thiểu 5000; mặc định 15000 |
 | `timeoutMs` | number | không | Tối thiểu 30000; mặc định 180000 |
@@ -128,7 +127,6 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
   -H 'Idempotency-Key: image-request-UNIQUE_ID' \
   --data '{
     "worker": "extension",
-    "projectUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID",
     "ratio": "16:9",
     "outputs": 1,
     "prompt": "A cinematic robot cat walking in Hoi An"
@@ -146,7 +144,6 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
   -H 'Idempotency-Key: image-edit-UNIQUE_ID' \
   --data '{
     "worker": "extension",
-    "projectUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID",
     "referenceImageUrl": "http://127.0.0.1:8787/assets/ASSET_NAME.jpg",
     "ratio": "16:9",
     "outputs": 1,
@@ -155,6 +152,8 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
 ```
 
 Image-to-image dùng cùng quy tắc `outputs: 1..4`; nếu không gửi field này thì mỗi prompt tạo một ảnh.
+
+Client không gửi `projectUrl`. Backend khóa project bằng biến môi trường `FLOW_PROJECT_URL` và từ chối tạo ảnh/video nếu biến này thiếu hoặc không phải URL project Flow hợp lệ.
 
 Sau khi POST trả `id`, client chỉ poll `GET /jobs/:id`. Không gọi lại `POST /generate` để kiểm tra tiến trình. Một ảnh mới chủ ý phải dùng một `Idempotency-Key` mới.
 
@@ -343,7 +342,7 @@ curl -sS -X POST https://nhans-macbook-pro-1.tail5d608a.ts.net/video \
   }'
 ```
 
-Các field: `prompt` hoặc `prompts`, `ratio` (`16:9` hoặc `9:16`), `projectUrl`, `timeoutMs` (mặc định 600 giây), `maxRetries`. Response `200` chứa kết quả nếu đã xong; response `202` trả `id` để client poll `GET /jobs/:jobId`. Khi xong, public S3 URL nằm trong `videos[]` theo thứ tự prompt.
+Các field: `prompt` hoặc `prompts`, `ratio` (`16:9` hoặc `9:16`), `timeoutMs` (mặc định 600 giây), `maxRetries`. Project được backend lấy từ `FLOW_PROJECT_URL`. Response `200` chứa kết quả nếu đã xong; response `202` trả `id` để client poll `GET /jobs/:jobId`. Khi xong, public S3 URL nằm trong `videos[]` theo thứ tự prompt.
 
 Image-to-video dùng thêm `referenceImageUrl`. URL có thể là public HTTP(S), hoặc URL từ `POST /assets`:
 

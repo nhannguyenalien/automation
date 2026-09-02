@@ -35,6 +35,23 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
+const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
+
+function validateFlowProjectUrl(value) {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || parsed.hostname !== "labs.google" || !parsed.pathname.includes("/tools/flow/project/")) {
+      return null;
+    }
+    return parsed.href;
+  } catch {
+    return null;
+  }
+}
+
+// The Flow project is server-owned configuration. API callers must not be able
+// to select another project (including an obsolete project ID).
+const flowProjectUrl = validateFlowProjectUrl(configuredFlowProjectUrl);
 const s3Endpoint = String(process.env.S3_ENDPOINT || "").replace(/\/$/, "");
 const s3Region = process.env.S3_REGION || "us-east-1";
 const s3Bucket = process.env.S3_BUCKET || "flow-images";
@@ -534,7 +551,10 @@ const server = http.createServer(async (req, res) => {
       if (referenceImageUrl && worker !== "extension") return send(res, 400, { error: "Ảnh tham chiếu hiện chỉ hỗ trợ worker extension" });
       const delayMs = Math.max(5000, Number(body.delayMs || 15000));
       const timeoutMs = Math.max(30000, Number(body.timeoutMs || 180000));
-      const projectUrl = body.projectUrl || process.env.FLOW_PROJECT_URL || "https://labs.google/fx/vi/tools/flow";
+      if (!flowProjectUrl) {
+        return send(res, 503, { error: "Backend chưa cấu hình FLOW_PROJECT_URL là URL project Flow hợp lệ" });
+      }
+      const projectUrl = flowProjectUrl;
       const maxRetries = Math.max(0, Math.min(5, Number(body.maxRetries ?? defaultImageMaxRetries)));
       const identity = idempotentIdentity(req, body, "image", {
         prompts: prompts.map(x => x.trim()), ratio, outputs, worker, referenceImageUrl,
@@ -653,7 +673,10 @@ const server = http.createServer(async (req, res) => {
       const ratio = body.ratio || "16:9";
       if (!new Set(["16:9", "9:16"]).has(ratio)) return send(res, 400, { error: "Video ratio chỉ nhận 16:9 hoặc 9:16" });
       const timeoutMs = Math.max(120000, Number(body.timeoutMs || 600000));
-      const projectUrl = body.projectUrl || process.env.FLOW_PROJECT_URL || "https://labs.google/fx/vi/tools/flow";
+      if (!flowProjectUrl) {
+        return send(res, 503, { error: "Backend chưa cấu hình FLOW_PROJECT_URL là URL project Flow hợp lệ" });
+      }
+      const projectUrl = flowProjectUrl;
       const maxRetries = Math.max(0, Math.min(5, Number(body.maxRetries ?? defaultMaxRetries)));
       const referenceImageUrl = body.referenceImageUrl ? String(body.referenceImageUrl) : null;
       if (referenceImageUrl && !/^https?:\/\//i.test(referenceImageUrl)) {
