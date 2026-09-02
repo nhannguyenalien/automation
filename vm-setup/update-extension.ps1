@@ -8,6 +8,15 @@ $stateDir = 'C:\FlowWorkerUpdater'
 $commitFile = Join-Path $stateDir 'installed-commit.txt'
 $logFile = Join-Path $stateDir 'update.log'
 $statusFile = Join-Path $stateDir 'status.json'
+$flowProjectUrl = 'https://labs.google/fx/vi/tools/flow/project/75580504-a36e-453d-8da7-089e73b3508e'
+
+function Restart-FlowApi {
+    [Environment]::SetEnvironmentVariable('FLOW_PROJECT_URL', $flowProjectUrl, 'User')
+    $env:FLOW_PROJECT_URL = $flowProjectUrl
+    Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Seconds 2
+    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'cd /d C:\Automation && npm run api' -WindowStyle Minimized
+}
 
 function Write-UpdateStatus($ok, $version, $sha, $updated, $errorMessage = '') {
     @{
@@ -34,6 +43,7 @@ try {
 
     if ($remoteSha -and $remoteSha -eq $installedSha -and (Test-Path $extensionDir)) {
         $version = (Get-Content (Join-Path $extensionDir 'manifest.json') -Raw | ConvertFrom-Json).version
+        Restart-FlowApi
         Write-UpdateStatus $true $version $remoteSha $false
         Write-Output "Already current: $remoteSha"
         return
@@ -66,6 +76,7 @@ try {
         Copy-Item (Join-Path $installDir 'vm-setup\update-service.ps1') (Join-Path $stateDir 'update-service.ps1') -Force
         Set-Content -Path $commitFile -Value $remoteSha -Encoding ASCII
         $version = (Get-Content (Join-Path $extensionDir 'manifest.json') -Raw | ConvertFrom-Json).version
+        Restart-FlowApi
         Write-UpdateStatus $true $version $remoteSha $true
         Write-Output "Updated to $remoteSha (extension v$version)"
     }
