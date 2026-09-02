@@ -67,9 +67,11 @@ async function referenceDataUrl(url) {
 
 async function flowTab(projectUrl, type) {
   const { flowProjectUrl = "" } = await chrome.storage.local.get("flowProjectUrl");
-  const requested = new URL(flowProjectUrl || projectUrl);
+  // A project URL attached to the API job is authoritative. The value pinned
+  // in the popup is only a fallback for older callers which omit projectUrl.
+  const requested = new URL(projectUrl || flowProjectUrl);
   if (!requested.pathname.includes("/tools/flow/project/")) {
-    throw new Error(`projectUrl phải là URL project Flow, hiện nhận được: ${flowProjectUrl || projectUrl}`);
+    throw new Error(`projectUrl phải là URL project Flow, hiện nhận được: ${projectUrl || flowProjectUrl}`);
   }
   const requestedPath = requested.origin + requested.pathname;
   let targetPath = requestedPath;
@@ -109,36 +111,16 @@ async function flowTab(projectUrl, type) {
     const availableProjectTabs = tabs.filter(candidate =>
       candidate.id !== saved[otherKey] && projectRoot(candidate)
     );
-    const activeDifferentProject = !flowProjectUrl && availableProjectTabs.find(candidate =>
-      candidate.active && projectRoot(candidate) !== `${requested.origin}${projectPath}`
-    );
-    const reusableProjectTab = activeDifferentProject ||
-      (projectRoot(savedTab) && savedTab.id !== saved[otherKey] ? savedTab : availableProjectTabs[0]);
+    const reusableProjectTab = availableProjectTabs.find(isRequestedProject);
 
-    if (activeDifferentProject) {
-      // The project the user has visibly opened is a stronger signal than a
-      // stale configured id or a previously assigned background tab.
-      const reusableUrl = projectRoot(activeDifferentProject);
-      tab = await chrome.tabs.update(activeDifferentProject.id, { url: reusableUrl, active: true }).catch(() => null);
-      if (tab) {
-        targetPath = reusableUrl;
-        await chrome.storage.local.set({ [ownKey]: tab.id, flowResolvedProjectUrl: reusableUrl });
-      }
-    } else if (isRequestedProject(savedTab)) {
+    if (isRequestedProject(savedTab)) {
       // A completed inspection leaves the SPA at /edit/<asset>. Always return
       // the lane's one dedicated tab to the gallery before starting a job.
       tab = await chrome.tabs.update(savedTab.id, { url: effectiveProjectUrl, active: true }).catch(() => null);
     } else if (reusableProjectTab) {
-      // FLOW_PROJECT_URL can become stale after a project is deleted or when
-      // Chrome is signed into another account. Prefer a real project already
-      // open in this Chrome profile and remember its tab for subsequent jobs.
-      // This keeps the worker operational without baking a project id into the
-      // extension or requiring every API caller to send projectUrl.
-      const reusableUrl = projectRoot(reusableProjectTab);
-      tab = await chrome.tabs.update(reusableProjectTab.id, { url: reusableUrl, active: true }).catch(() => null);
+      tab = await chrome.tabs.update(reusableProjectTab.id, { url: effectiveProjectUrl, active: true }).catch(() => null);
       if (tab) {
-        targetPath = reusableUrl;
-        await chrome.storage.local.set({ [ownKey]: tab.id, flowResolvedProjectUrl: reusableUrl });
+        await chrome.storage.local.set({ [ownKey]: tab.id, flowResolvedProjectUrl: requestedPath });
       }
     }
     if (!tab) {
