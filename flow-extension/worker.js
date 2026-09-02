@@ -313,6 +313,21 @@ async function poll(lane) {
 
 chrome.runtime.onInstalled.addListener(() => chrome.alarms.create("poll", { periodInMinutes: 0.1 }));
 chrome.runtime.onStartup.addListener(() => chrome.alarms.create("poll", { periodInMinutes: 0.1 }));
+chrome.runtime.onInstalled.addListener(() => chrome.alarms.create("extension-update", { periodInMinutes: 5 }));
+chrome.runtime.onStartup.addListener(() => chrome.alarms.create("extension-update", { periodInMinutes: 5 }));
+
+async function reloadWhenUpdaterInstalledNewVersion() {
+  try {
+    const response = await fetch("http://127.0.0.1:8765/status", { cache: "no-store" });
+    if (!response.ok) return;
+    const result = await response.json();
+    if (result.ok && result.version && result.version !== chrome.runtime.getManifest().version) {
+      chrome.runtime.reload();
+    }
+  } catch {
+    // The helper is optional; queue processing must continue if it is offline.
+  }
+}
 function pollAll() {
   void poll("chat");
   void poll("image");
@@ -322,8 +337,13 @@ function pollAll() {
 // onInstalled/onStartup. Initialise polling whenever this service worker is
 // evaluated so queued jobs resume without requiring a popup button click.
 void chrome.alarms.create("poll", { periodInMinutes: 0.1 });
+void chrome.alarms.create("extension-update", { periodInMinutes: 5 });
 pollAll();
-chrome.alarms.onAlarm.addListener(alarm => { if (alarm.name === "poll") pollAll(); });
+void reloadWhenUpdaterInstalledNewVersion();
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === "poll") pollAll();
+  if (alarm.name === "extension-update") void reloadWhenUpdaterInstalledNewVersion();
+});
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "POLL_NOW") pollAll();
   if (message.type === "INSPECT_IMAGE_URL") {

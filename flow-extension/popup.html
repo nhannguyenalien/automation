@@ -1,9 +1,9 @@
 <!doctype html><html lang="vi"><meta charset="utf-8"><style>
-body{font:14px system-ui;width:310px;padding:14px;color:#202124}label{display:block;margin:9px 0 4px}input{box-sizing:border-box;width:100%;padding:8px}button{margin-top:12px;padding:9px 12px;width:100%}#status{margin-top:10px;white-space:pre-wrap}
-</style><h3>Flow Image Worker</h3>
+body{font:14px system-ui;width:310px;padding:14px;color:#202124}label{display:block;margin:9px 0 4px}input{box-sizing:border-box;width:100%;padding:8px}button{margin-top:12px;padding:9px 12px;width:100%}#status{margin-top:10px;white-space:pre-wrap}.version{color:#5f6368;font-size:12px}
+</style><h3>Flow Image Worker <span class="version" id="version"></span></h3>
 <label>API URL</label><input id="apiUrl">
 <label>API key</label><input id="apiKey" type="password">
 <label>Worker ID</label><input id="workerId">
 <label>Flow project URL</label><input id="flowProjectUrl" placeholder="https://labs.google/fx/vi/tools/flow/project/..."><button id="useCurrentProject" type="button">Dùng project ở tab hiện tại</button>
 <label><input id="enabled" type="checkbox" style="width:auto"> Bật worker</label>
-<button id="save">Lưu và kiểm tra ngay</button><div id="status"></div><script src="popup.js"></script></html>
+<button id="save">Lưu và kiểm tra ngay</button><button id="update" type="button">Kiểm tra và cập nhật extension</button><div id="status"></div><script src="popup.js"></script></html>

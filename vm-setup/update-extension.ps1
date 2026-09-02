@@ -7,14 +7,18 @@ $extensionDir = Join-Path $installDir 'flow-extension'
 $stateDir = 'C:\FlowWorkerUpdater'
 $commitFile = Join-Path $stateDir 'installed-commit.txt'
 $logFile = Join-Path $stateDir 'update.log'
-$chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
-$chromeArgs = @(
-    '--user-data-dir=C:\ChromeProfile'
-    '--load-extension=C:\Automation\flow-extension'
-    '--no-first-run'
-    '--no-default-browser-check'
-    'https://gemini.google.com/app'
-)
+$statusFile = Join-Path $stateDir 'status.json'
+
+function Write-UpdateStatus($ok, $version, $sha, $updated, $errorMessage = '') {
+    @{
+        ok = [bool]$ok
+        version = [string]$version
+        sha = [string]$sha
+        updated = [bool]$updated
+        error = [string]$errorMessage
+        checkedAt = (Get-Date).ToUniversalTime().ToString('o')
+    } | ConvertTo-Json | Set-Content -Path $statusFile -Encoding UTF8
+}
 
 New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 Start-Transcript -Path $logFile -Append | Out-Null
@@ -29,8 +33,10 @@ try {
     $installedSha = if (Test-Path $commitFile) { (Get-Content $commitFile -Raw).Trim() } else { '' }
 
     if ($remoteSha -and $remoteSha -eq $installedSha -and (Test-Path $extensionDir)) {
+        $version = (Get-Content (Join-Path $extensionDir 'manifest.json') -Raw | ConvertFrom-Json).version
+        Write-UpdateStatus $true $version $remoteSha $false
         Write-Output "Already current: $remoteSha"
-        exit 0
+        return
     }
 
     $workDir = Join-Path $env:TEMP ("flow-worker-update-" + [guid]::NewGuid().ToString('N'))
@@ -54,20 +60,22 @@ try {
         if ($null -ne $savedRuntime) {
             Set-Content -Path $runtimeConfig -Value $savedRuntime -Encoding UTF8
         }
+        # Refresh the maintenance scripts too, so future fixes do not require
+        # reinstalling the updater manually.
+        Copy-Item (Join-Path $installDir 'vm-setup\update-extension.ps1') (Join-Path $stateDir 'update-extension.ps1') -Force
+        Copy-Item (Join-Path $installDir 'vm-setup\update-service.ps1') (Join-Path $stateDir 'update-service.ps1') -Force
         Set-Content -Path $commitFile -Value $remoteSha -Encoding ASCII
-
-        Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process -Force
-        Start-Sleep -Seconds 2
-        Start-Process -FilePath $chrome -ArgumentList $chromeArgs
-        Write-Output "Updated to $remoteSha and restarted Chrome"
+        $version = (Get-Content (Join-Path $extensionDir 'manifest.json') -Raw | ConvertFrom-Json).version
+        Write-UpdateStatus $true $version $remoteSha $true
+        Write-Output "Updated to $remoteSha (extension v$version)"
     }
     finally {
         Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 catch {
+    Write-UpdateStatus $false '' '' $false $_.Exception.Message
     Write-Error $_
-    exit 1
 }
 finally {
     Stop-Transcript -ErrorAction SilentlyContinue | Out-Null

@@ -1,6 +1,7 @@
 const ids = ["apiUrl", "apiKey", "workerId", "flowProjectUrl", "enabled"];
 const fields = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
 const status = document.getElementById("status");
+document.getElementById("version").textContent = `v${chrome.runtime.getManifest().version}`;
 
 chrome.storage.local.get(ids, values => {
   fields.apiUrl.value = values.apiUrl || "http://127.0.0.1:8787";
@@ -42,4 +43,25 @@ document.getElementById("save").addEventListener("click", async () => {
   await chrome.storage.local.set(values);
   chrome.runtime.sendMessage({ type: "POLL_NOW" });
   status.textContent = "Đã lưu. Worker đang kiểm tra queue.";
+});
+
+document.getElementById("update").addEventListener("click", async event => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  status.textContent = "Đang yêu cầu Windows tải bản mới từ GitHub…";
+  try {
+    const response = await fetch("http://127.0.0.1:8765/update", { method: "POST" });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (result.version === chrome.runtime.getManifest().version) {
+      status.textContent = `Đã là bản mới nhất v${result.version}.`;
+      return;
+    }
+    status.textContent = `Đã tải v${result.version}. Extension đang khởi động lại…`;
+    setTimeout(() => chrome.runtime.reload(), 700);
+  } catch (error) {
+    status.textContent = `Không gọi được updater Windows: ${error.message}\nHãy chạy lại vm-setup\\install-updater.ps1 bằng PowerShell Administrator.`;
+  } finally {
+    button.disabled = false;
+  }
 });
