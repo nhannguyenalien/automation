@@ -467,13 +467,21 @@ async function openFlowSection(type) {
     // Agent composer and the media type is selected from its bottom button.
     // `configure` handles that picker, so do not block for a sidebar item
     // which cannot exist in this UI variant.
-    const agentComposer = deepElements('button,[role="button"]')
+    const readyComposer = deepElements('button,[role="button"]')
       .find(element => {
-        if (!visible(element) || !/^(?:Tác nhân|Agent)$/i.test(labelText(element).trim())) return false;
+        if (!visible(element)) return false;
+        const label = labelText(element).trim();
+        const genericAgent = /^(?:Tác nhân|Agent)$/i.test(label);
+        const configuredMedia = /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) && /x\d/i.test(label);
+        if (!genericAgent && !configuredMedia) return false;
         const rect = element.getBoundingClientRect();
         return rect.top > window.innerHeight * 0.6 && rect.width < 400 && rect.height < 100;
       });
-    return agentComposer ? { skip: true } : null;
+    // A configured Nano Banana/Veo composer is also sufficient. Flow can
+    // collapse or delay the media-library sidebar while keeping this composer
+    // fully usable; waiting for the sidebar in that state caused intermittent
+    // 60-second failures before `configure` ever got a chance to run.
+    return readyComposer ? { skip: true } : null;
   }, 60000, `mục ${type === "video" ? "Video" : "Hình ảnh"} ở sidebar Flow`);
 
   if (target.skip) return;
