@@ -450,8 +450,8 @@ async function openFlowSection(type) {
   const pattern = type === "video"
     ? /(?:^|\s)(?:Video|Videos)\s*$/i
     : /(?:^|\s)(?:Hình ảnh|Images?|Xem hình ảnh|View images)\s*$/i;
-  const section = await waitFor(() => {
-    return deepElements('a,button,[role="button"],[role="tab"],[role="link"]')
+  const target = await waitFor(() => {
+    const section = deepElements('a,button,[role="button"],[role="tab"],[role="link"]')
       .filter(element => {
         if (!visible(element) || !pattern.test(labelText(element))) return false;
         const rect = element.getBoundingClientRect();
@@ -460,9 +460,24 @@ async function openFlowSection(type) {
         return rect.left < Math.min(360, window.innerWidth * 0.3) && rect.top > 80 && rect.height < 100;
       })
       .sort((a, b) => labelText(a).length - labelText(b).length)[0] || null;
+    if (section) return { section };
+
+    // The September 2026 Flow project UI removed the Images/Video library
+    // tabs from the sidebar. A fresh project instead starts with the generic
+    // Agent composer and the media type is selected from its bottom button.
+    // `configure` handles that picker, so do not block for a sidebar item
+    // which cannot exist in this UI variant.
+    const agentComposer = deepElements('button,[role="button"]')
+      .find(element => {
+        if (!visible(element) || !/^(?:Tác nhân|Agent)$/i.test(labelText(element).trim())) return false;
+        const rect = element.getBoundingClientRect();
+        return rect.top > window.innerHeight * 0.6 && rect.width < 400 && rect.height < 100;
+      });
+    return agentComposer ? { skip: true } : null;
   }, 60000, `mục ${type === "video" ? "Video" : "Hình ảnh"} ở sidebar Flow`);
 
-  await clickLikeUser(section);
+  if (target.skip) return;
+  await clickLikeUser(target.section);
   await sleep(700);
 
   // The sidebar only filters the media library. It does not switch the
