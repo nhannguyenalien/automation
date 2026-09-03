@@ -35,12 +35,23 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-03-worker-lock-v1";
+const apiRelease = "2026-09-03-worker-queue-scope-v2";
 const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
 const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION_WORKER_PREFIXES || "")
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+// Scope extension jobs in the indexed `worker` column, not only at the claim
+// endpoint. Multiple API deployments may share one Turso database; an older
+// deployment otherwise cannot see our allowlist and can lease these jobs to
+// one of its Chrome workers.
+const extensionQueueWorker = allowedExtensionWorkerPrefixes.length === 1
+  ? `extension:${allowedExtensionWorkerPrefixes[0]}`
+  : "extension";
+
+function isExtensionJob(job) {
+  return typeof job?.worker === "string" && (job.worker === "extension" || job.worker.startsWith("extension:"));
+}
 
 function isAllowedExtensionWorker(workerId) {
   if (!allowedExtensionWorkerPrefixes.length) return true;
@@ -211,7 +222,7 @@ async function recoverInterruptedJobs() {
     // a restart. Extension work runs inside Chrome and may still be active;
     // keep its live lease so a restarted API cannot hand out the same task a
     // second time while Chrome is still generating.
-    if (job.worker === "extension" && job.lease?.expiresAt > now) continue;
+    if (isExtensionJob(job) && job.lease?.expiresAt > now) continue;
     job.status = "queued";
     job.lease = null;
     job.logs ||= [];
@@ -236,7 +247,7 @@ async function claimExtensionJob(workerId, requestedTypes) {
     // the lease authoritative on the server: one worker id (one lane) may own
     // at most one unexpired task.
     const active = await transaction.execute({ sql: `SELECT payload FROM jobs
-      WHERE worker = 'extension' AND status = 'running' AND lease_expires_at > ?`, args: [now] });
+      WHERE worker = ? AND status = 'running' AND lease_expires_at > ?`, args: [extensionQueueWorker, now] });
     const workerAlreadyBusy = active.rows.some(row => {
       try {
         return JSON.parse(String(row.payload)).lease?.workerId === workerId;
@@ -249,10 +260,10 @@ async function claimExtensionJob(workerId, requestedTypes) {
       return null;
     }
     const result = await transaction.execute({ sql: `SELECT payload FROM jobs
-      WHERE worker = 'extension' AND status IN ('queued', 'running')
+      WHERE worker = ? AND status IN ('queued', 'running')
         AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
         ${typeClause}
-      ORDER BY updated_at, created_at`, args: [now, ...types] });
+      ORDER BY updated_at, created_at`, args: [extensionQueueWorker, now, ...types] });
     for (const row of result.rows) {
       const job = JSON.parse(String(row.payload));
       const index = job.results.findIndex(value => value === null);
@@ -336,7 +347,7 @@ function publicJob(job, req) {
     model: job.model || null,
     total: job.prompts.length, createdAt: job.createdAt,
     startedAt: job.startedAt || null, finishedAt: job.finishedAt || null,
-    error: job.error || null, worker: job.worker,
+    error: job.error || null, worker: isExtensionJob(job) ? "extension" : job.worker,
     progress: job.results?.filter(Boolean).length || 0,
     attempts: job.attempts || [], maxRetries: job.maxRetries ?? defaultMaxRetries,
     images: extensionImages.length ? extensionImages : localImages,
@@ -583,7 +594,8 @@ const server = http.createServer(async (req, res) => {
       const job = {
         id, type: "image", prompts: prompts.map(x => x.trim()), ratio, outputs,
         delayMs, timeoutMs, projectUrl,
-        worker, referenceImageUrl, status: "queued", createdAt: new Date().toISOString(), logs: [], images: [],
+        worker: worker === "extension" ? extensionQueueWorker : worker,
+        referenceImageUrl, status: "queued", createdAt: new Date().toISOString(), logs: [], images: [],
         results: Array(prompts.length).fill(null), attempts: Array(prompts.length).fill(0),
         maxRetries, batchSize: imageBatchSize, lease: null,
         idempotencyKeyHash: identity?.keyHash || null,
@@ -649,7 +661,7 @@ const server = http.createServer(async (req, res) => {
         chatUrl,
         newConversation,
         model,
-        worker: "extension",
+        worker: extensionQueueWorker,
         status: "queued",
         createdAt: new Date().toISOString(),
         logs: [], images: [], results: Array(prompts.length).fill(null),
@@ -707,7 +719,7 @@ const server = http.createServer(async (req, res) => {
       const id = identity?.id || `video-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
       const job = { id, type: "video", prompts: prompts.map(x => x.trim()), ratio,
         model: "veo-3.1-lite", timeoutMs, projectUrl,
-        worker: "extension", referenceImageUrl, status: "queued", createdAt: new Date().toISOString(),
+        worker: extensionQueueWorker, referenceImageUrl, status: "queued", createdAt: new Date().toISOString(),
         logs: [], images: [], results: Array(prompts.length).fill(null), attempts: Array(prompts.length).fill(0),
         maxRetries, lease: null,
         idempotencyKeyHash: identity?.keyHash || null,
@@ -761,7 +773,7 @@ const server = http.createServer(async (req, res) => {
       const job = {
         id, type: "video", mode: "extend", prompts: [prompt], ratio: null,
         model: "veo-3.1-lite", timeoutMs, projectUrl, sourceFlowUrl: source.href,
-        worker: "extension", referenceImageUrl: null, status: "queued", createdAt: new Date().toISOString(),
+        worker: extensionQueueWorker, referenceImageUrl: null, status: "queued", createdAt: new Date().toISOString(),
         logs: [], images: [], results: [null], attempts: [0], maxRetries, lease: null,
         idempotencyKeyHash: identity?.keyHash || null,
         requestFingerprint: identity?.requestFingerprint || null
@@ -808,7 +820,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const job = await getJob(String(body.jobId || ""));
       const index = Number(body.index);
-      if (!job || job.worker !== "extension" || !Number.isInteger(index) || index < 0 || index >= job.prompts.length) {
+      if (!job || !isExtensionJob(job) || !Number.isInteger(index) || index < 0 || index >= job.prompts.length) {
         return send(res, 404, { error: "Task không tồn tại" });
       }
       if (!job.lease || job.lease.index !== index) return send(res, 409, { error: "Task không còn lease" });
@@ -865,7 +877,7 @@ const server = http.createServer(async (req, res) => {
       const index = Number(url.searchParams.get("index"));
       const output = Number(url.searchParams.get("output") || 1);
       const job = await getJob(jobId);
-      if (!job || job.worker !== "extension" || !Number.isInteger(index) || index < 0 || index >= job.prompts.length) {
+      if (!job || !isExtensionJob(job) || !Number.isInteger(index) || index < 0 || index >= job.prompts.length) {
         return send(res, 404, { error: "Task không tồn tại" });
       }
       if (!job.lease || job.lease.index !== index) return send(res, 409, { error: "Task không còn lease" });
