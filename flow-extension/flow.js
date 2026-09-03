@@ -525,11 +525,21 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       return configured || genericAgent || namedMedia || ratioOnly;
     });
     const labelled = buttons
-    // Prefer the fully configured control if both an old hidden-ish control
-    // and the new Agent button are mounted during a Flow transition.
+    // The current composer renders model and ratio as separate adjacent
+    // buttons. Prefer a named model button over a ratio-only button; otherwise
+    // opening `1:1` here leads to a ratio menu that cannot contain Image/Video.
     .sort((a, b) => {
-      const configured = el => /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(labelText(el)) && /x\d/i.test(labelText(el));
-      return Number(configured(b)) - Number(configured(a));
+      const rank = (el) => {
+        const label = labelText(el).trim();
+        const configured = /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) && /x\d/i.test(label);
+        const namedMedia = /(?:Nano Banana|Imagen|Hình ảnh|Image|Video|Veo)/i.test(label);
+        const genericAgent = /^(?:Tác nhân|Agent)$/i.test(label);
+        if (configured) return 4;
+        if (namedMedia) return 3;
+        if (genericAgent) return 2;
+        return 1;
+      };
+      return rank(b) - rank(a);
     })[0];
     if (labelled) return labelled;
 
