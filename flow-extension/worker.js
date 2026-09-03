@@ -342,6 +342,22 @@ async function reloadWhenUpdaterInstalledNewVersion() {
     // The helper is optional; queue processing must continue if it is offline.
   }
 }
+
+async function reloadAiTabsAfterRuntimeStart() {
+  // An unpacked extension update does not refresh content scripts already
+  // running in open pages. Run this from the newly loaded service worker,
+  // after chrome.runtime.reload(), so tabs receive the new files rather than
+  // another copy from the previous extension runtime.
+  const version = chrome.runtime.getManifest().version;
+  const { contentScriptsRuntimeVersion } = await chrome.storage.local.get("contentScriptsRuntimeVersion");
+  if (contentScriptsRuntimeVersion === version) return;
+  await chrome.storage.local.set({ contentScriptsRuntimeVersion: version });
+  const aiTabs = await chrome.tabs.query({ url: [
+    "https://labs.google/fx/*",
+    "https://gemini.google.com/*"
+  ] });
+  await Promise.all(aiTabs.map(tab => chrome.tabs.reload(tab.id).catch(() => {})));
+}
 function pollAll() {
   void poll("chat");
   void poll("image");
@@ -353,6 +369,7 @@ function pollAll() {
 void chrome.alarms.create("poll", { periodInMinutes: 0.1 });
 void chrome.alarms.create("extension-update", { periodInMinutes: 5 });
 pollAll();
+void reloadAiTabsAfterRuntimeStart();
 void reloadWhenUpdaterInstalledNewVersion();
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === "poll") pollAll();
