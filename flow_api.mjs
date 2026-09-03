@@ -35,7 +35,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-03-worker-queue-scope-v2";
+const apiRelease = "2026-09-03-image-continue-on-error-v1";
 const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
 const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION_WORKER_PREFIXES || "")
   .split(",")
@@ -96,6 +96,31 @@ function notifyTerminalJob(job) {
   const waiters = terminalJobWaiters.get(job.id);
   terminalJobWaiters.delete(job.id);
   for (const resolve of waiters || []) resolve(job);
+}
+
+function settleImagePromptFailure(job, index, error) {
+  job.results[index] = { ok: false, error };
+  job.lease = null;
+  const pending = job.results.some(result => result === null);
+  if (pending) {
+    job.status = "queued";
+    job.error = null;
+    job.logs.push(`Bỏ qua prompt ${index + 1} bị lỗi; tiếp tục prompt kế tiếp`);
+    return;
+  }
+
+  const succeeded = job.results.filter(result => result?.ok).length;
+  job.finishedAt = new Date().toISOString();
+  if (succeeded > 0) {
+    job.status = "completed";
+    job.partial = succeeded < job.results.length;
+    job.error = null;
+    job.logs.push(`Job hoàn tất một phần: ${succeeded}/${job.results.length} prompt thành công`);
+  } else {
+    job.status = "failed";
+    job.partial = false;
+    job.error = error;
+  }
 }
 
 await fs.mkdir(jobsDir, { recursive: true });
@@ -271,11 +296,16 @@ async function claimExtensionJob(workerId, requestedTypes) {
       job.attempts ||= Array(job.prompts.length).fill(0);
       const maxAttempts = (job.maxRetries ?? defaultMaxRetries) + 1;
       if (job.attempts[index] >= maxAttempts) {
-        job.results[index] = { ok: false, error: "Task hết lease và đã vượt số lần retry" };
-        job.status = "failed";
-        job.error = job.results[index].error;
-        job.finishedAt = new Date().toISOString();
-        job.lease = null;
+        const error = "Task hết lease và đã vượt số lần retry";
+        if ((job.type || "image") === "image") {
+          settleImagePromptFailure(job, index, error);
+        } else {
+          job.results[index] = { ok: false, error };
+          job.status = "failed";
+          job.error = error;
+          job.finishedAt = new Date().toISOString();
+          job.lease = null;
+        }
         await saveJob(job, transaction);
         continue;
       }
@@ -340,6 +370,9 @@ function publicJob(job, req) {
   const localImages = job.images.map(name => `${origin}/jobs/${job.id}/images/${encodeURIComponent(name)}`);
   const responses = (job.results || []).map(result => result?.text).filter(text => typeof text === "string");
   const conversationUrls = (job.results || []).map(result => result?.conversationUrl).filter(Boolean);
+  const failures = (job.results || []).flatMap((result, index) => result?.ok === false
+    ? [{ index: index + 1, error: result.error || "Lỗi không xác định" }]
+    : []);
   return {
     id: job.id, type: job.type || "image", mode: job.mode || null, status: job.status, ratio: job.ratio,
     outputs: job.type === "image" ? (job.outputs || 1) : null,
@@ -349,6 +382,10 @@ function publicJob(job, req) {
     startedAt: job.startedAt || null, finishedAt: job.finishedAt || null,
     error: job.error || null, worker: isExtensionJob(job) ? "extension" : job.worker,
     progress: job.results?.filter(Boolean).length || 0,
+    succeeded: job.results?.filter(result => result?.ok === true).length || 0,
+    failed: failures.length,
+    partial: Boolean(job.partial),
+    failures,
     attempts: job.attempts || [], maxRetries: job.maxRetries ?? defaultMaxRetries,
     images: extensionImages.length ? extensionImages : localImages,
     videos,
@@ -857,6 +894,8 @@ const server = http.createServer(async (req, res) => {
         if ((job.attempts?.[index] || 1) < maxAttempts) {
           job.status = "queued";
           job.logs.push(`Đưa prompt ${index + 1} về hàng đợi để retry`);
+        } else if ((job.type || "image") === "image") {
+          settleImagePromptFailure(job, index, result.error);
         } else {
           job.results[index] = result;
           job.status = "failed";
@@ -865,6 +904,13 @@ const server = http.createServer(async (req, res) => {
         }
       } else if (job.results.every(Boolean)) {
         job.status = "completed";
+        if ((job.type || "image") === "image") {
+          job.partial = job.results.some(item => item?.ok === false);
+          if (job.partial) {
+            const succeeded = job.results.filter(item => item?.ok === true).length;
+            job.logs.push(`Job hoàn tất một phần: ${succeeded}/${job.results.length} prompt thành công`);
+          }
+        }
         job.finishedAt = new Date().toISOString();
       }
       await saveJob(job);
