@@ -616,13 +616,11 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
     return waitFor(findControl, 10000, label);
   }
 
-  // The media-library sidebar and the composer keep independent state. Flow
-  // can therefore show the Hình ảnh sidebar while the composer is still on
-  // Video. Always re-select Hình ảnh for image jobs; the model-button label
-  // is not a reliable indication immediately after changing sidebar tabs.
-  // Video can keep the conditional path because selecting it repeatedly may
-  // reset its Thành phần/Khung hình sub-mode.
-  if (type === "image" || !expectedMode.test(labelText(mode))) {
+  // Only switch media type when the composer is actually in the opposite
+  // mode. Once Nano Banana is selected, Flow opens the settings submenu
+  // directly (ratio/output) and no longer includes an Image item there.
+  // Trying to re-select Image in that state caused a false 10-second timeout.
+  if (!expectedMode.test(labelText(mode))) {
     const mediaType = await ensureMenuControl(
       type === "video"
         ? /(?:^|\s)(?:Video|Videos)\s*$/i
