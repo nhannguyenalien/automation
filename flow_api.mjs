@@ -36,6 +36,15 @@ const inlineWaitByType = {
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
 const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
+const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION_WORKER_PREFIXES || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+function isAllowedExtensionWorker(workerId) {
+  if (!allowedExtensionWorkerPrefixes.length) return true;
+  return allowedExtensionWorkerPrefixes.some((prefix) => workerId === prefix || workerId.startsWith(`${prefix}-`));
+}
 
 function validateFlowProjectUrl(value) {
   try {
@@ -772,6 +781,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/extension/claim" && req.method === "POST") {
       const body = await readJson(req);
       const workerId = String(body.workerId || "chrome-worker").slice(0, 100);
+      if (!isAllowedExtensionWorker(workerId)) {
+        return send(res, 200, { task: null });
+      }
       const job = await claimExtensionJob(workerId, body.types);
       if (job) {
         const index = job.lease.index;
