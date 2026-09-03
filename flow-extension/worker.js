@@ -328,6 +328,14 @@ async function reloadWhenUpdaterInstalledNewVersion() {
     if (!response.ok) return;
     const result = await response.json();
     if (result.ok && result.version && result.version !== chrome.runtime.getManifest().version) {
+      // Reloading an unpacked extension replaces its service worker but Chrome
+      // leaves already-injected content scripts running in open tabs. Refresh
+      // Flow/Gemini first so those tabs load the same version from disk.
+      const aiTabs = await chrome.tabs.query({ url: [
+        "https://labs.google/fx/*",
+        "https://gemini.google.com/*"
+      ] });
+      await Promise.all(aiTabs.map(tab => chrome.tabs.reload(tab.id).catch(() => {})));
       chrome.runtime.reload();
     }
   } catch {
