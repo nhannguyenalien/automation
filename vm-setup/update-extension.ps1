@@ -18,6 +18,16 @@ function Restart-FlowApi {
     Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'C:\Automation\vm-setup\start-api.cmd' -WindowStyle Minimized
 }
 
+function Test-FlowApiHealthy {
+    try {
+        $response = Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 -Uri 'http://127.0.0.1:8787/health'
+        return $response.StatusCode -eq 200
+    }
+    catch {
+        return $false
+    }
+}
+
 function Write-UpdateStatus($ok, $version, $sha, $updated, $errorMessage = '') {
     @{
         ok = [bool]$ok
@@ -43,7 +53,13 @@ try {
 
     if ($remoteSha -and $remoteSha -eq $installedSha -and (Test-Path $extensionDir)) {
         $version = (Get-Content (Join-Path $extensionDir 'manifest.json') -Raw | ConvertFrom-Json).version
-        Restart-FlowApi
+        # This task runs every five minutes. Restarting a healthy API here
+        # interrupts long image/video jobs and makes Tailscale Funnel return
+        # HTTP 502 while clients poll /jobs/:id.
+        if (-not (Test-FlowApiHealthy)) {
+            Restart-FlowApi
+            Write-Output 'API was unhealthy and has been restarted.'
+        }
         Write-UpdateStatus $true $version $remoteSha $false
         Write-Output "Already current: $remoteSha"
         return
