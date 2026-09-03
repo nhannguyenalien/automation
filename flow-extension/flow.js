@@ -608,7 +608,10 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       mode = await waitFor(findModeButton, 10000, "nút cấu hình Flow");
       await clickLikeUser(mode);
       await sleep(500);
-      await waitFor(findModeMenu, 10000, "menu cấu hình Flow");
+      // Do not require the popover to contain ratio and output controls at
+      // the same time. The current Flow UI opens a first-level media picker
+      // (Image/Video) and only renders ratio/x1 after that selection, so the
+      // old `findModeMenu` predicate could reject a perfectly open menu.
     }
     return waitFor(findControl, 10000, label);
   }
