@@ -502,8 +502,8 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
   // structural (mode/model + crop icon + output count) so future model-name
   // changes do not make the whole worker unable to find its settings button.
   const expectedMode = type === "video" ? /Video|Veo/i : /Nano Banana|Imagen|Hình ảnh|Image/i;
-  const findModeButton = () => deepElements("button")
-    .filter(el => {
+  const findModeButton = () => {
+    const buttons = deepElements("button").filter(el => {
       const label = labelText(el);
       if (!visible(el)) return false;
       const rect = el.getBoundingClientRect();
@@ -523,13 +523,42 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       const namedMedia = /(?:Nano Banana|Imagen|Hình ảnh|Image|Video|Veo)/i.test(label);
       const ratioOnly = /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label);
       return configured || genericAgent || namedMedia || ratioOnly;
-    })
+    });
+    const labelled = buttons
     // Prefer the fully configured control if both an old hidden-ish control
     // and the new Agent button are mounted during a Flow transition.
     .sort((a, b) => {
       const configured = el => /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(labelText(el)) && /x\d/i.test(labelText(el));
       return Number(configured(b)) - Number(configured(a));
-    })[0] || null;
+    })[0];
+    if (labelled) return labelled;
+
+    // Last-resort structural lookup for UI experiments where Flow renders the
+    // mode button as an icon without useful text. It sits in the same bottom
+    // composer as the prompt editor and opens a popup/menu. Submit and media
+    // attachment controls are explicitly excluded.
+    const editor = [...document.querySelectorAll('[contenteditable="true"]')]
+      .filter(visible)
+      .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
+    if (!editor) return null;
+    const er = editor.getBoundingClientRect();
+    return deepElements("button")
+      .filter(el => {
+        if (!visible(el)) return false;
+        const label = labelText(el);
+        if (/arrow_forward|add_2|Add media|Thêm nội dung nghe nhìn|Tạo|Create|Generate/i.test(label)) return false;
+        const rect = el.getBoundingClientRect();
+        const nearComposer = rect.top >= er.top - 40 && rect.top <= er.bottom + 120 &&
+          rect.left >= er.left - 80 && rect.right <= er.right + 80 && rect.width < 400 && rect.height < 100;
+        return nearComposer && (el.hasAttribute("aria-haspopup") || rect.left < er.left + er.width * 0.7);
+      })
+      .sort((a, b) => {
+        const ah = a.hasAttribute("aria-haspopup") ? 1 : 0;
+        const bh = b.hasAttribute("aria-haspopup") ? 1 : 0;
+        if (ah !== bh) return bh - ah;
+        return a.getBoundingClientRect().left - b.getBoundingClientRect().left;
+      })[0] || null;
+  };
   const findModeMenu = () => deepElements('[role="menu"],[role="dialog"],[role="listbox"],div')
     .filter(el => {
       const label = labelText(el);
@@ -601,7 +630,14 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
     await sleep(500);
     mode = await waitFor(() => {
       const current = findModeButton();
-      return current && expectedMode.test(labelText(current)) ? current : null;
+      if (!current) return null;
+      const label = labelText(current);
+      // A successful click on the exact Image/Video menu item is authoritative.
+      // New Flow variants may leave the replacement button icon-only.
+      const visiblyOpposite = type === "image"
+        ? /Video|Veo/i.test(label)
+        : /Nano Banana|Imagen|Hình ảnh|Image/i.test(label);
+      return visiblyOpposite ? null : current;
     }, 10000, `trình tạo ${type === "video" ? "Veo" : "ảnh"}`);
   }
 
