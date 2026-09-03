@@ -15,7 +15,7 @@ function Restart-FlowApi {
     $env:FLOW_PROJECT_URL = $flowProjectUrl
     Get-Process -Name node -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Seconds 2
-    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'cd /d C:\Automation && npm run api' -WindowStyle Minimized
+    Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', 'C:\Automation\vm-setup\start-api.cmd' -WindowStyle Minimized
 }
 
 function Write-UpdateStatus($ok, $version, $sha, $updated, $errorMessage = '') {
