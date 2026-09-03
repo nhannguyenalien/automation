@@ -516,7 +516,13 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       // as a mode button and let the branch below switch it to Image/Video.
       const configured = /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label) && /x\d/i.test(label);
       const genericAgent = /^(?:Tác nhân|Agent)$/i.test(label.trim());
-      return configured || genericAgent;
+      // Flow's current UI briefly removes the output-count text after an x1
+      // selection and can replace the crop icon with the model name alone.
+      // This is still the same composer control. Requiring both `crop_*` and
+      // `x1` made the final mode check fail even though Image was selected.
+      const namedMedia = /(?:Nano Banana|Imagen|Hình ảnh|Image|Video|Veo)/i.test(label);
+      const ratioOnly = /(?:crop_[\d_]+|\d+\s*:\s*\d+)/i.test(label);
+      return configured || genericAgent || namedMedia || ratioOnly;
     })
     // Prefer the fully configured control if both an old hidden-ish control
     // and the new Agent button are mounted during a Flow transition.
