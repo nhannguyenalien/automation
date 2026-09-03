@@ -35,6 +35,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
+const apiRelease = "2026-09-03-worker-lock-v1";
 const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
 const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION_WORKER_PREFIXES || "")
   .split(",")
@@ -499,7 +500,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/health" && req.method === "GET") {
       const stats = await queueStats();
       return send(res, 200, {
-        ok: true, running, queued: stats.queued, queue: stats,
+        ok: true, release: apiRelease, running, queued: stats.queued, queue: stats,
+        extensionWorkers: { allowedPrefixes: allowedExtensionWorkerPrefixes },
         database: { type: "turso", persistent: true, connected: true },
         storage: { configured: s3Configured, bucket: s3Configured ? s3Bucket : null }
       });
