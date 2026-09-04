@@ -412,7 +412,11 @@ function sendText(res, status, body, contentType = "text/plain; charset=utf-8") 
 
 function publicOrigin(req) {
   const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
-  const proto = forwardedProto || (req.socket.encrypted ? "https" : "http");
+  let cloudflareProto = "";
+  try {
+    cloudflareProto = JSON.parse(String(req.headers["cf-visitor"] || "{}"))?.scheme || "";
+  } catch {}
+  const proto = forwardedProto || cloudflareProto || (req.socket.encrypted ? "https" : "http");
   return `${proto}://${req.headers.host || `${host}:${port}`}`;
 }
 
