@@ -10,40 +10,51 @@
 </head>
 <body><div class="layout">
   <aside><div class="brand">Google AI Browser API</div><nav class="nav">
-    <a href="#start">Bắt đầu nhanh</a><a href="#chat">Chat Gemini</a><a href="#text-image">Text to image</a><a href="#image-image">Image to image</a><a href="#video">Video</a><a href="#jobs">Theo dõi job</a><a href="#reference">Tham số</a><a href="#production">Vận hành</a>
+    <a href="#start">Bắt đầu nhanh</a><a href="#agent">Dành cho AI agent</a><a href="#chat">Chat Gemini/ChatGPT</a><a href="#text-image">Text to image</a><a href="#image-image">Image to image</a><a href="#video">Text/Image to video</a><a href="#video-to-video">Video to video</a><a href="#jobs">Theo dõi job</a><a href="#reference">Tham số</a><a href="#production">Vận hành</a>
   </nav></aside>
   <main>
     <section class="hero"><div class="badge"><span class="dot" id="healthDot"></span><span id="healthText">Đang kiểm tra API…</span></div><h1>API cho Gemini Chat và Google Flow</h1><p>Một contract chung cho chat, ảnh và video: xong nhanh trả dữ liệu ngay; chạy lâu trả ID để client lấy kết quả sau.</p><div class="base"><strong>Base URL</strong><code id="baseUrl"></code><button class="copy" data-copy="#baseUrl">Sao chép</button></div></section>
 
     <h2 id="start">Bắt đầu nhanh</h2>
     <div class="card"><div class="endpoint"><span class="method get">GET</span><code>/health</code></div><pre><code>curl "$BASE_URL/health"</code></pre></div>
-    <div class="note">Máy chạy API phải mở Chrome, đăng nhập Google Pro và bật extension. Job được lưu trên Turso nên không mất khi API restart và có thể dùng chung giữa nhiều máy. Funnel hiện đưa API ra Internet; hãy đặt API key nếu URL được chia sẻ.</div>
+    <div class="note">Máy chạy API phải mở Chrome, đăng nhập Google Pro và bật extension. Job được lưu trên Turso nên không mất khi API restart và có thể dùng chung giữa nhiều máy. Funnel hiện đưa API ra Internet; hãy đặt <code>FLOW_API_KEY</code> và khai báo <code>FLOW_CLIENT_KEY</code> ở client.</div>
 
-    <h2 id="chat">Chat Gemini</h2><p>Mặc định extension chủ động chọn <code>3.5-flash-lite</code>. Đặt <code>model</code> thành <code>3.1-pro</code> nếu cần.</p>
+    <h2 id="agent">Dành cho AI agent</h2>
+    <div class="card"><p>Cho agent đọc <a href="/llms.txt"><code>/llms.txt</code></a> để nắm luồng gọi API ngắn gọn, hoặc import <a href="/openapi.json"><code>/openapi.json</code></a> để tự hiểu endpoint và schema. Hai trang tài liệu này public như <code>/docs</code>; các endpoint thực thi vẫn bắt buộc API key.</p><pre><code>Agent guide:  $BASE_URL/llms.txt
+OpenAPI:      $BASE_URL/openapi.json
+Human docs:   $BASE_URL/docs</code></pre></div>
+
+    <h2 id="chat">Chat Gemini hoặc ChatGPT</h2><p>Mặc định dùng Gemini <code>3.5-flash-lite</code>. Với ChatGPT web, đặt <code>provider</code> thành <code>chatgpt</code> và dùng model <code>default</code>.</p>
     <div class="card"><div class="endpoint"><span class="method">POST</span><code>/chat</code></div><pre><code>curl -X POST "$BASE_URL/chat" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: chat-batch-UNIQUE_ID" \
   -d '{
+    "provider": "gemini",
     "prompt": "Viết 5 tiêu đề quảng cáo cho một khóa học AI",
     "model": "3.5-flash-lite",
     "newConversation": true
-  }'</code></pre><p>Gửi batch bằng <code>"prompts": ["Câu 1", "Câu 2"]</code>. Nếu xong nhanh API trả HTTP 200 với dữ liệu; nếu chưa xong trả HTTP 202 với <code>id</code>, <code>Location</code> và <code>Retry-After</code>. Nếu POST mất response, retry đúng payload với cùng key để nhận lại job cũ.</p></div>
+  }'</code></pre><p>ChatGPT: gửi <code>{"provider":"chatgpt","model":"default","prompt":"..."}</code>. Gửi batch bằng <code>"prompts": ["Câu 1", "Câu 2"]</code>. Nếu xong nhanh API trả HTTP 200 với dữ liệu; nếu chưa xong trả HTTP 202 với <code>id</code>, <code>Location</code> và <code>Retry-After</code>.</p></div>
 
     <h2 id="text-image">Text to image</h2>
     <div class="card"><div class="endpoint"><span class="method">POST</span><code>/generate</code></div><pre><code>curl -X POST "$BASE_URL/generate" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: image-request-UNIQUE_ID" \
   -d '{
+    "provider": "flow",
     "prompt": "Một chú mèo máy ở Hội An, cinematic",
     "ratio": "16:9",
     "outputs": 1,
     "worker": "extension"
-  }'</code></pre><p>Mặc định một prompt tạo đúng một ảnh. Chỉ đặt <code>outputs</code> lớn hơn 1 khi thật sự muốn nhiều phương án. Một job nhận tối đa 100 ảnh; API xử lý ngầm tuần tự theo nhóm tiến độ 10 prompt. Giữ nguyên <code>Idempotency-Key</code> khi retry cùng một yêu cầu để API trả lại job cũ, không tạo thêm ảnh. Sau khi nhận <code>id</code>, chỉ dùng <code>GET /jobs/:id</code> để theo dõi.</p></div>
+  }'</code></pre><p>Mặc định dùng <code>provider: "flow"</code>. Để tạo ảnh bằng phiên đăng nhập ChatGPT web, gửi <code>{"provider":"chatgpt","worker":"extension","outputs":1,"prompt":"..."}</code>. ChatGPT hiện chưa hỗ trợ ảnh tham chiếu. Một prompt mặc định tạo đúng một ảnh; giữ nguyên <code>Idempotency-Key</code> khi retry cùng yêu cầu và sau khi nhận <code>id</code> chỉ dùng <code>GET /jobs/:id</code> để theo dõi.</p></div>
 
     <h2 id="image-image">Image to image</h2><p>Upload ảnh gốc trước, sau đó dùng URL nhận được làm <code>referenceImageUrl</code>.</p>
     <div class="steps"><div><h3>Upload ảnh tham chiếu</h3><pre><code>curl -X POST "$BASE_URL/assets" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
   -H "Content-Type: image/jpeg" \
   --data-binary @anh-goc.jpg</code></pre><p>Kết quả có dạng <code>{ "url": "https://…/assets/…jpg" }</code>.</p></div><div><h3>Tạo ảnh từ ảnh gốc</h3><pre><code>curl -X POST "$BASE_URL/generate" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: image-edit-UNIQUE_ID" \
   -d '{
@@ -54,41 +65,60 @@
     "referenceImageUrl": "URL_NHAN_DUOC_O_BUOC_1"
   }'</code></pre><p>Image-to-image cũng nhận <code>outputs: 1..4</code>; bỏ field thì mặc định một ảnh cho mỗi prompt.</p></div></div>
 
-    <h2 id="video">Video</h2>
+    <h2 id="video">Text/Image to video</h2>
     <div class="card"><div class="endpoint"><span class="method">POST</span><code>/video</code></div><pre><code>curl -X POST "$BASE_URL/video" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: video-request-UNIQUE_ID" \
   -d '{
     "prompt": "Rồng máy bay trên Vịnh Hạ Long lúc bình minh",
     "ratio": "16:9"
   }'</code></pre><p>Video dùng cùng contract HTTP 200/202 và cùng cơ chế lấy kết quả bằng <code>GET /jobs/:id</code>. URL hoàn tất nằm trong <code>videos[]</code>.</p><h3>Image-to-video</h3><pre><code>curl -X POST "$BASE_URL/video" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: image-video-UNIQUE_ID" \
   -d '{
     "prompt": "Chú công máy từ từ xòe chiếc đuôi phát sáng",
     "referenceImageUrl": "URL_NHAN_DUOC_TU_POST_ASSETS",
     "ratio": "16:9"
-  }'</code></pre><p>Có <code>referenceImageUrl</code>: extension dùng ảnh làm khung hình đầu; không cần ảnh cuối. Bỏ field này: chạy text-to-video. Mỗi prompt luôn tạo đúng một video.</p><h3>Nối tiếp video</h3><pre><code>curl -X POST "$BASE_URL/video/extend" \
+  }'</code></pre><p>Có <code>referenceImageUrl</code>: extension dùng ảnh làm khung hình đầu; không cần ảnh cuối. Bỏ field này: chạy text-to-video. Mỗi prompt luôn tạo đúng một video.</p></div>
+
+    <h2 id="video-to-video">Video-to-video (nối tiếp Flow)</h2>
+    <div class="card"><p>Luồng này dùng cảnh cuối của một scene Flow làm cảnh đầu cho đoạn mới qua <strong>Kéo dài (Veo 3.1 Lite)</strong>. Nguồn bắt buộc là <code>sourceFlowUrl</code> dạng <code>/project/.../scene/...</code>; API không nhận file MP4, <code>sourceVideoUrl</code> hay URL S3 bất kỳ làm nguồn.</p><div class="endpoint"><span class="method">POST</span><code>/video/extend</code></div><pre><code>curl -X POST "$BASE_URL/video/extend" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: video-extend-UNIQUE_ID" \
   -d '{
     "sourceFlowUrl":"https://labs.google/fx/vi/tools/flow/project/PROJECT_ID/scene/SCENE_ID",
     "prompt":"Continue through the doorway into a moonlit garden"
-  }'</code></pre><p>Flow tự lấy cảnh cuối làm cảnh đầu đoạn mới. Khi xong, dùng <code>videos[]</code> để tải MP4 và dùng <code>flowUrl</code> làm nguồn cho lần nối kế tiếp. Request phải chạy tuần tự; mặc định không retry.</p></div>
+  }'</code></pre><p>Extension hard reload đúng scene và chỉ hoàn tất sau khi xác minh thời lượng tăng cùng khung hình lưu vẫn còn; sau đó mới upload MP4. Dùng <code>videos[]</code> để tải MP4 và <code>flowUrl</code> làm <code>sourceFlowUrl</code> cho lần nối kế tiếp. Mỗi request nối một đoạn, phải chạy tuần tự cho cùng scene và mặc định không retry.</p><h3>Response hoàn tất</h3><pre><code>{
+  "id": "video-extend-job-id",
+  "type": "video",
+  "mode": "extend",
+  "status": "completed",
+  "videos": ["https://s3.example.com/jobs/video-extend-job-id/001.mp4"],
+  "flowUrl": "https://labs.google/fx/vi/tools/flow/project/PROJECT_ID/scene/SCENE_ID",
+  "durationSeconds": 16
+}</code></pre></div>
 
     <h2 id="jobs">Theo dõi và lấy kết quả</h2>
     <div class="note">Contract chung: API chờ bằng event nội bộ, mặc định 20 giây cho chat và 2 giây cho ảnh/video, không poll Turso trong lúc chờ. POST trả HTTP 200 nếu đã xong; nếu chưa xong trả HTTP 202 + <code>id</code>. Với 202, gọi <code>GET /jobs/:id</code> theo <code>retryAfterSeconds</code> và dừng khi <code>completed</code> hoặc <code>failed</code>. Nếu POST mất response, retry đúng payload và cùng <code>Idempotency-Key</code>.</div>
-    <div class="card"><div class="endpoint"><span class="method get">GET</span><code>/jobs/:id</code></div><pre><code>curl "$BASE_URL/jobs/JOB_ID"</code></pre><p><code>queued</code>: đang xếp hàng; <code>running</code>: extension đang xử lý; <code>completed</code>: đã xong toàn bộ; <code>failed</code>: thất bại sau retry. Ảnh thành công là các URL public S3 trong <code>images[]</code>; chat nằm trong <code>response</code> hoặc <code>responses[]</code>.</p><pre><code>{
+    <div class="card"><div class="endpoint"><span class="method get">GET</span><code>/jobs/:id</code></div><pre><code>curl "$BASE_URL/jobs/JOB_ID" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY"</code></pre><p><code>queued</code>: đang xếp hàng; <code>running</code>: extension đang xử lý; <code>completed</code>: đã xong toàn bộ; <code>failed</code>: thất bại sau retry. Ảnh thành công là các URL public S3 trong <code>images[]</code>; chat nằm trong <code>response</code> hoặc <code>responses[]</code>.</p><pre><code>{
   "id": "…",
   "status": "completed",
   "progress": 2,
   "total": 2,
   "images": ["https://s3a.schoolsai.work/…"]
-}</code></pre><h3>Ví dụ JavaScript: tạo job và chờ kết quả</h3><pre><code>async function generateAndWait(prompt) {
+}</code></pre><h3>Ví dụ JavaScript: tạo job và chờ kết quả</h3><pre><code>const API_BASE_URL = "https://nhans-macbook-pro-1.tail5d608a.ts.net";
+const FLOW_CLIENT_KEY = "YOUR_CLIENT_KEY";
+
+async function generateAndWait(prompt) {
   const idempotencyKey = crypto.randomUUID();
-  const created = await fetch(`${BASE_URL}/generate`, {
+  const created = await fetch(`${API_BASE_URL}/generate`, {
     method: "POST",
     headers: {
+      "Authorization": `Bearer ${FLOW_CLIENT_KEY}`,
       "Content-Type": "application/json",
       "Idempotency-Key": idempotencyKey
     },
@@ -108,7 +138,9 @@
   const deadline = Date.now() + 15 * 60_000;
   while (Date.now() < deadline) {
     await new Promise(resolve => setTimeout(resolve, 4000));
-    const response = await fetch(`${BASE_URL}/jobs/${id}`);
+    const response = await fetch(`${API_BASE_URL}/jobs/${id}`, {
+      headers: { "Authorization": `Bearer ${FLOW_CLIENT_KEY}` }
+    });
     if (!response.ok) throw new Error(await response.text());
     job = await response.json();
     if (job.status === "completed") return job.images;
@@ -117,9 +149,9 @@
   throw new Error(`Timeout khi chờ job ${id}`);
 }</code></pre></div>
 
-    <h2 id="reference">Tham số chính</h2><p>Project Flow được backend khóa bằng <code>FLOW_PROJECT_URL</code>; client không gửi <code>projectUrl</code>.</p><div class="card table"><table><thead><tr><th>API</th><th>Trường</th><th>Giá trị</th></tr></thead><tbody><tr><td>/generate</td><td>prompt / prompts</td><td>Chuỗi hoặc mảng, tối đa 100; xử lý tuần tự theo nhóm 10</td></tr><tr><td>/generate</td><td>ratio</td><td>16:9, 4:3, 1:1, 3:4, 9:16</td></tr><tr><td>/generate</td><td>outputs</td><td>1–4 ảnh cho mỗi prompt; mặc định 1, chỉ extension khi lớn hơn 1</td></tr><tr><td>/generate, /chat, /video, /video/extend</td><td>Idempotency-Key</td><td>Header định danh request; retry cùng request phải giữ nguyên key</td></tr><tr><td>/generate</td><td>worker</td><td>extension (khuyên dùng)</td></tr><tr><td>/generate, /video</td><td>referenceImageUrl</td><td>URL HTTP(S) ảnh gốc/khung hình đầu, chỉ extension</td></tr><tr><td>/video/extend</td><td>sourceFlowUrl</td><td>URL scene Flow <code>/project/.../scene/...</code>; bắt buộc</td></tr><tr><td>/generate</td><td>timeoutMs</td><td>Timeout mỗi prompt phía worker; mặc định 180.000 ms</td></tr><tr><td>/video</td><td>timeoutMs</td><td>Mặc định 600.000 ms; Veo 3.1 Lite, x1</td></tr><tr><td>/video/extend</td><td>timeoutMs</td><td>Mặc định 900.000 ms; maxRetries mặc định 0</td></tr><tr><td>/generate</td><td>maxRetries</td><td>0–5; mặc định 0 để tránh tạo ảnh trùng</td></tr><tr><td>/chat</td><td>maxRetries</td><td>0–5; mặc định 2</td></tr><tr><td>/chat</td><td>model</td><td>3.5-flash-lite (mặc định) hoặc 3.1-pro</td></tr><tr><td>/chat</td><td>newConversation</td><td>true / false</td></tr></tbody></table></div>
+    <h2 id="reference">Tham số chính</h2><p>Project Flow được backend khóa bằng <code>FLOW_PROJECT_URL</code>; client không gửi <code>projectUrl</code>.</p><div class="card table"><table><thead><tr><th>API</th><th>Trường</th><th>Giá trị</th></tr></thead><tbody><tr><td>/generate</td><td>prompt / prompts</td><td>Chuỗi hoặc mảng, tối đa 100; xử lý tuần tự theo nhóm 10</td></tr><tr><td>/generate</td><td>ratio</td><td>16:9, 4:3, 1:1, 3:4, 9:16</td></tr><tr><td>/generate</td><td>outputs</td><td>1–4 ảnh cho mỗi prompt; mặc định 1, chỉ extension khi lớn hơn 1</td></tr><tr><td>/generate, /chat, /video, /video/extend</td><td>Idempotency-Key</td><td>Header định danh request; retry cùng request phải giữ nguyên key</td></tr><tr><td>/generate</td><td>worker</td><td>extension (khuyên dùng)</td></tr><tr><td>/generate, /video</td><td>referenceImageUrl</td><td>URL HTTP(S) ảnh gốc/khung hình đầu, chỉ extension</td></tr><tr><td>/video/extend</td><td>sourceFlowUrl</td><td>URL scene Flow <code>/project/.../scene/...</code>; bắt buộc, không phải URL MP4/S3</td></tr><tr><td>/generate</td><td>timeoutMs</td><td>Timeout mỗi prompt phía worker; mặc định 180.000 ms</td></tr><tr><td>/video</td><td>timeoutMs</td><td>Mặc định 600.000 ms; Veo 3.1 Lite, x1</td></tr><tr><td>/video/extend</td><td>timeoutMs</td><td>Mặc định 900.000 ms; maxRetries mặc định 0</td></tr><tr><td>/generate</td><td>maxRetries</td><td>0–5; mặc định 0 để tránh tạo ảnh trùng</td></tr><tr><td>/chat</td><td>maxRetries</td><td>0–5; mặc định 2</td></tr><tr><td>/chat</td><td>model</td><td>3.5-flash-lite (mặc định) hoặc 3.1-pro</td></tr><tr><td>/chat</td><td>newConversation</td><td>true / false</td></tr></tbody></table></div>
 
-    <h2 id="production">Vận hành ổn định</h2><div class="card"><ul><li>Khởi động bằng <code>npm run api</code>; lệnh tự đọc file <code>.env</code>.</li><li>Cấu hình <code>TURSO_DATABASE_URL</code> và <code>TURSO_AUTH_TOKEN</code>. Turso là nguồn dữ liệu queue chính.</li><li>Giữ đúng ba tab cố định: Gemini Chat, Flow Image và Flow Video. Extension bấm Hình ảnh/Video ở sidebar, đồng thời xác nhận loại composer trong popup vì sidebar chỉ lọc thư viện.</li><li>Không đóng Chrome hoặc tắt extension khi job đang chạy.</li><li>Restart API sẽ tự đưa job đang chạy về hàng đợi.</li><li><code>FLOW_MAX_QUEUED</code> mặc định 100. <code>FLOW_IMAGE_MAX_RETRIES</code> mặc định 0; <code>FLOW_MAX_RETRIES</code> mặc định 2 cho các loại khác.</li><li>Client POST một lần: HTTP <code>200</code> thì dùng kết quả ngay; HTTP <code>202</code> thì lưu <code>id</code> và poll bằng GET. Dùng <code>Idempotency-Key</code> cho mọi job chat, ảnh và video.</li><li><code>/health</code> trả số job queued/running/completed/failed và trạng thái Turso.</li><li>Vì Funnel public Internet, nên bật <code>FLOW_API_KEY</code> trước khi dùng production hoặc chia sẻ URL.</li></ul></div>
+    <h2 id="production">Vận hành ổn định</h2><div class="card"><ul><li>Chạy foreground bằng <code>npm run api</code>; lệnh tự đọc file <code>.env</code>. Trên Mac chạy lâu dài, cài <code>ops/com.schoolsai.flow-api.plist</code> làm LaunchAgent để tự bật và tự khởi động lại. Không chạy thêm process thứ hai trên cổng 8787, nếu không sẽ gặp <code>EADDRINUSE</code>.</li><li>Cấu hình <code>TURSO_DATABASE_URL</code> và <code>TURSO_AUTH_TOKEN</code>. Turso là nguồn dữ liệu queue chính.</li><li>Giữ đúng ba tab cố định: Gemini Chat, Flow Image và Flow Video. Extension bấm Hình ảnh/Video ở sidebar, đồng thời xác nhận loại composer trong popup vì sidebar chỉ lọc thư viện.</li><li>Không đóng Chrome hoặc tắt extension khi job đang chạy.</li><li>Restart API không xóa job Turso; job đang chạy sẽ được đưa lại hàng đợi sau khi lease được thu hồi/hết hạn.</li><li><code>FLOW_MAX_QUEUED</code> mặc định 100. <code>FLOW_IMAGE_MAX_RETRIES</code> mặc định 0; <code>FLOW_MAX_RETRIES</code> mặc định 2 cho các loại khác.</li><li>Client POST một lần: HTTP <code>200</code> thì dùng kết quả ngay; HTTP <code>202</code> thì lưu <code>id</code> và poll bằng GET. Dùng <code>Idempotency-Key</code> cho mọi job chat, ảnh và video.</li><li><code>/health</code> trả thống kê Turso trong object <code>queue</code>. Field cấp cao <code>running</code> chỉ là trạng thái worker Playwright nội bộ, không phải online/offline của extension.</li><li>Vì Funnel public Internet, nên bật <code>FLOW_API_KEY</code> trước khi dùng production hoặc chia sẻ URL.</li></ul></div>
   </main>
 </div><script>
 const base=location.origin;document.querySelector('#baseUrl').textContent=base;

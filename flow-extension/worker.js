@@ -5,7 +5,11 @@ const defaults = {
   apiUrl: runtimeDefaults.apiUrl || "http://127.0.0.1:8787",
   apiKey: runtimeDefaults.apiKey || "",
   workerId: runtimeDefaults.workerId || `chrome-${crypto.randomUUID().slice(0, 8)}`,
-  enabled: runtimeDefaults.enabled ?? false
+  enabled: runtimeDefaults.enabled ?? false,
+  capabilities: runtimeDefaults.capabilities || [
+    "chat:gemini:3.5-flash-lite", "chat:gemini:3.1-pro", "chat:chatgpt:default",
+    "image:flow:default", "image:chatgpt:default", "video:flow:veo-3.1-lite"
+  ]
 };
 const busyLanes = { chat: false, image: false, video: false };
 let flowTabLock = Promise.resolve();
@@ -192,6 +196,42 @@ async function geminiTab(chatUrl, newConversation) {
   throw new Error("Gemini Chat chưa tải xong sau 90 giây");
 }
 
+async function chatgptTab(chatUrl, newConversation, imageMode = false) {
+  const tabs = await chrome.tabs.query({ url: "https://chatgpt.com/*" });
+  const targetUrl = imageMode
+    ? "https://chatgpt.com/images/"
+    : newConversation ? "https://chatgpt.com/" : (chatUrl || "https://chatgpt.com/");
+  const target = new URL(targetUrl);
+  const targetPath = target.origin + target.pathname.replace(/\/$/, "");
+  const exactTab = tabs.find(item => {
+    if (!item.url) return false;
+    const current = new URL(item.url);
+    return current.origin + current.pathname.replace(/\/$/, "") === targetPath;
+  });
+  const reusableTab = exactTab || tabs.find(item => item.active) || tabs[0];
+  let opened;
+  if (exactTab) opened = await chrome.tabs.update(exactTab.id, { active: true });
+  else if (reusableTab) opened = await chrome.tabs.update(reusableTab.id, { url: targetUrl, active: true });
+  else opened = await chrome.tabs.create({ url: targetUrl, active: true });
+  const started = Date.now();
+  while (Date.now() - started < 90000) {
+    const current = await chrome.tabs.get(opened.id);
+    if (current.status === "complete" && current.url?.startsWith("https://chatgpt.com/")) return current;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  throw new Error("ChatGPT chưa tải xong sau 90 giây");
+}
+
+function chatProviderTab(task) {
+  const chatgptImage = task.type === "image" && task.provider === "chatgpt";
+  const newConversation = task.type === "image" && task.provider === "chatgpt"
+    ? true
+    : task.newConversation && task.index === 0;
+  return (task.provider || "gemini") === "chatgpt"
+    ? chatgptTab(task.chatUrl, newConversation, chatgptImage)
+    : geminiTab(task.chatUrl, newConversation);
+}
+
 async function waitReady(tabId, timeout = 60000) {
   const started = Date.now();
   while (Date.now() - started < timeout) {
@@ -245,6 +285,7 @@ async function poll(lane) {
   // pass the guard and lease multiple jobs to one Chrome tab.
   busyLanes[lane] = true;
   let task;
+  let laneWorkerId;
   try {
     const cfg = await config();
     if (!cfg.enabled || !cfg.apiKey) return;
@@ -252,7 +293,15 @@ async function poll(lane) {
     const laneBlock = blockedLanes[lane];
     if (laneBlock && !canRetryLane(laneBlock)) return;
     const types = [lane];
-    ({ task } = await api("/extension/claim", { workerId: `${cfg.workerId}-${lane}`, types }));
+    laneWorkerId = `${cfg.workerId}-${lane}`;
+    const capabilities = Array.isArray(cfg.capabilities)
+      ? cfg.capabilities.filter(item => String(item).startsWith(`${lane}:`))
+      : [];
+    ({ task } = await api("/extension/claim", {
+      workerId: laneWorkerId, machineId: cfg.workerId,
+      version: chrome.runtime.getManifest().version, enabled: cfg.enabled,
+      types, capabilities
+    }));
     if (!task) {
       if (laneBlock) {
         const { [lane]: removed, ...remainingBlocks } = blockedLanes;
@@ -261,8 +310,8 @@ async function poll(lane) {
       return;
     }
     if (task.referenceImageUrl) task.referenceImageDataUrl = await referenceDataUrl(task.referenceImageUrl);
-    let tab = task.type === "chat"
-      ? await geminiTab(task.chatUrl, task.newConversation && task.index === 0)
+    let tab = task.type === "chat" || (task.type === "image" && task.provider === "chatgpt")
+      ? await chatProviderTab(task)
       : await flowTab(task.mode === "extend" ? task.sourceFlowUrl : task.projectUrl, task.type);
     // flowTab normally prefers the configured project and may intentionally
     // return to its gallery. Native video extension is different: the scene
@@ -272,8 +321,15 @@ async function poll(lane) {
       tab = await chrome.tabs.update(tab.id, { url: task.sourceFlowUrl, active: true });
     }
     await ensureReady(tab.id);
-    let result = await chrome.tabs.sendMessage(tab.id, { type: task.type === "chat" ? "CHAT" : "GENERATE", task });
-    if (!result?.ok) throw new Error(result?.error || "Content script xử lý thất bại");
+    const messageType = task.type === "chat" ? "CHAT"
+      : task.type === "image" && task.provider === "chatgpt" ? "GENERATE_IMAGE" : "GENERATE";
+    let result = await chrome.tabs.sendMessage(tab.id, { type: messageType, task });
+    if (!result?.ok) {
+      const taskError = new Error(result?.error || "Content script xử lý thất bại");
+      taskError.code = result?.errorCode || null;
+      taskError.retryable = result?.retryable !== false;
+      throw taskError;
+    }
     if (task.type === "video" && task.mode === "extend") {
       if (!result.prepared || !result.flowUrl) throw new Error("Flow chưa trả về scene video nối để xác minh");
       // A continuation is successful only when it survives a hard reload of
@@ -291,7 +347,10 @@ async function poll(lane) {
       });
       if (!result?.ok) throw new Error(result?.error || "Video nối biến mất sau reload");
     }
-    await api("/extension/result", { jobId: task.jobId, index: task.index, ...result });
+    await api("/extension/result", {
+      jobId: task.jobId, index: task.index, workerId: laneWorkerId,
+      leaseToken: task.leaseToken, ...result
+    });
     if (laneBlock) {
       const { blockedLanes: latestBlocks = {} } = await chrome.storage.local.get("blockedLanes");
       const { [lane]: removed, ...remainingBlocks } = latestBlocks;
@@ -299,7 +358,16 @@ async function poll(lane) {
     }
   } catch (error) {
     if (task) {
-      await api("/extension/result", { jobId: task.jobId, index: task.index, ok: false, error: error.message }).catch(() => {});
+      await api("/extension/result", {
+        jobId: task.jobId,
+        index: task.index,
+        workerId: laneWorkerId,
+        leaseToken: task.leaseToken,
+        ok: false,
+        error: error.message,
+        errorCode: error.code || null,
+        retryable: error.retryable !== false
+      }).catch(() => {});
     }
     const updates = { lastError: error.message, lastRun: new Date().toISOString() };
     if (isSystemicWorkerError(lane, error.message)) {
@@ -330,10 +398,11 @@ async function reloadWhenUpdaterInstalledNewVersion() {
     if (result.ok && result.version && result.version !== chrome.runtime.getManifest().version) {
       // Reloading an unpacked extension replaces its service worker but Chrome
       // leaves already-injected content scripts running in open tabs. Refresh
-      // Flow/Gemini first so those tabs load the same version from disk.
+      // Refresh AI tabs first so they load the same version from disk.
       const aiTabs = await chrome.tabs.query({ url: [
         "https://labs.google/fx/*",
-        "https://gemini.google.com/*"
+        "https://gemini.google.com/*",
+        "https://chatgpt.com/*"
       ] });
       await Promise.all(aiTabs.map(tab => chrome.tabs.reload(tab.id).catch(() => {})));
       chrome.runtime.reload();
@@ -354,7 +423,8 @@ async function reloadAiTabsAfterRuntimeStart() {
   await chrome.storage.local.set({ contentScriptsRuntimeVersion: version });
   const aiTabs = await chrome.tabs.query({ url: [
     "https://labs.google/fx/*",
-    "https://gemini.google.com/*"
+    "https://gemini.google.com/*",
+    "https://chatgpt.com/*"
   ] });
   await Promise.all(aiTabs.map(tab => chrome.tabs.reload(tab.id).catch(() => {})));
 }
@@ -363,16 +433,36 @@ function pollAll() {
   void poll("image");
   void poll("video");
 }
+
+async function heartbeat() {
+  const cfg = await config();
+  if (!cfg.apiKey) return;
+  const capabilities = Array.isArray(cfg.capabilities) ? cfg.capabilities : [];
+  await api("/extension/heartbeat", {
+    machineId: cfg.workerId,
+    version: chrome.runtime.getManifest().version,
+    enabled: cfg.enabled,
+    workers: ["chat", "image", "video"].map(lane => ({
+      workerId: `${cfg.workerId}-${lane}`,
+      capabilities: capabilities.filter(item => String(item).startsWith(`${lane}:`))
+    }))
+  });
+}
 // A manual reload of an unpacked extension does not consistently emit
 // onInstalled/onStartup. Initialise polling whenever this service worker is
 // evaluated so queued jobs resume without requiring a popup button click.
 void chrome.alarms.create("poll", { periodInMinutes: 0.1 });
+// Chrome production builds clamp recurring alarms to 30 seconds. The API
+// online window is deliberately longer so one delayed alarm does not flap.
+void chrome.alarms.create("heartbeat", { periodInMinutes: 0.5 });
 void chrome.alarms.create("extension-update", { periodInMinutes: 5 });
 pollAll();
+void heartbeat().catch(() => {});
 void reloadAiTabsAfterRuntimeStart();
 void reloadWhenUpdaterInstalledNewVersion();
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === "poll") pollAll();
+  if (alarm.name === "heartbeat") void heartbeat().catch(() => {});
   if (alarm.name === "extension-update") void reloadWhenUpdaterInstalledNewVersion();
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -401,10 +491,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "DOWNLOAD_URL") {
     (async () => {
       const mediaLabel = message.mediaType === "video" ? "video" : "ảnh";
-      if (!message.url) throw new Error(`Không lấy được URL ${mediaLabel} từ Flow`);
+      if (!message.url) throw new Error(`Không lấy được URL ${mediaLabel} từ trang AI`);
       const mediaType = message.mediaType === "video" ? "video" : "image";
       const source = await fetch(message.url);
-      if (!source.ok) throw new Error(`Không đọc được ${mediaLabel} output từ Flow: HTTP ${source.status}`);
+      if (!source.ok) throw new Error(`Không đọc được ${mediaLabel} output: HTTP ${source.status}`);
       const bytes = await source.arrayBuffer();
       const contentType = String(source.headers.get("content-type") || "image/png").split(";")[0];
       const uploaded = await uploadOutput(
@@ -414,7 +504,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       );
       const id = await chrome.downloads.download({
         url: message.url,
-        filename: `flow-${mediaType}s/flow-${Date.now()}-${message.output || 1}.png`,
+        filename: `${message.provider || "flow"}-${mediaType}s/${message.provider || "flow"}-${Date.now()}-${message.output || 1}.png`,
         conflictAction: "uniquify",
         saveAs: false
       });

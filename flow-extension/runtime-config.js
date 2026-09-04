@@ -4,5 +4,6 @@ export const runtimeDefaults = {
   apiKey: "",
   workerId: "",
   enabled: false,
+  capabilities: null,
   force: false
 };

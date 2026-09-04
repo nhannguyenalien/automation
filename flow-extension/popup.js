@@ -1,14 +1,19 @@
 const ids = ["apiUrl", "apiKey", "workerId", "flowProjectUrl", "enabled"];
 const fields = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
 const status = document.getElementById("status");
+const capabilityFields = [...document.querySelectorAll("[data-capability]")];
 document.getElementById("version").textContent = `v${chrome.runtime.getManifest().version}`;
 
-chrome.storage.local.get(ids, values => {
+chrome.storage.local.get([...ids, "capabilities"], values => {
   fields.apiUrl.value = values.apiUrl || "http://127.0.0.1:8787";
   fields.apiKey.value = values.apiKey || "";
   fields.workerId.value = values.workerId || `chrome-${crypto.randomUUID().slice(0, 8)}`;
   fields.flowProjectUrl.value = values.flowProjectUrl || values.flowResolvedProjectUrl || "";
   fields.enabled.checked = Boolean(values.enabled);
+  const enabledCapabilities = Array.isArray(values.capabilities)
+    ? values.capabilities
+    : capabilityFields.map(field => field.dataset.capability);
+  for (const field of capabilityFields) field.checked = enabledCapabilities.includes(field.dataset.capability);
 });
 
 function projectRoot(url) {
@@ -39,7 +44,8 @@ document.getElementById("save").addEventListener("click", async () => {
     status.textContent = "Flow project URL không hợp lệ.";
     return;
   }
-  const values = { apiUrl: fields.apiUrl.value.trim().replace(/\/$/, ""), apiKey: fields.apiKey.value, workerId: fields.workerId.value.trim(), flowProjectUrl, enabled: fields.enabled.checked, lastError: "", blockedLanes: {} };
+  const capabilities = capabilityFields.filter(field => field.checked).map(field => field.dataset.capability);
+  const values = { apiUrl: fields.apiUrl.value.trim().replace(/\/$/, ""), apiKey: fields.apiKey.value, workerId: fields.workerId.value.trim(), flowProjectUrl, enabled: fields.enabled.checked, capabilities, lastError: "", blockedLanes: {} };
   await chrome.storage.local.set(values);
   chrome.runtime.sendMessage({ type: "POLL_NOW" });
   status.textContent = "Đã lưu. Worker đang kiểm tra queue.";

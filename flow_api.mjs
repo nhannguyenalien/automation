@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 import { CreateBucketCommand, HeadBucketCommand, PutBucketPolicyCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { normalizeCapabilities, workerCanRun, workerRetryReady } from "./worker-routing.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const runtimeDir = path.join(root, ".flow-api");
@@ -25,6 +26,11 @@ const defaultMaxRetries = Math.max(0, Math.min(5, Number(process.env.FLOW_MAX_RE
 // the first attempt failed after clicking Generate. Keep image retries opt-in.
 const defaultImageMaxRetries = Math.max(0, Math.min(5, Number(process.env.FLOW_IMAGE_MAX_RETRIES || 0)));
 const clientPollAfterSeconds = Math.max(5, Number(process.env.FLOW_CLIENT_POLL_AFTER_SECONDS || 600));
+const workerOnlineSeconds = Math.max(45, Number(process.env.FLOW_WORKER_ONLINE_SECONDS || 75));
+const sameWorkerRetryDelayMs = Math.max(5000, Number(process.env.FLOW_SAME_WORKER_RETRY_DELAY_MS || 60000));
+const providerFailoverRetries = Math.max(0, Math.min(5, Number(process.env.FLOW_PROVIDER_FAILOVER_RETRIES || 2)));
+const providerWorkerCooldownMs = Math.max(sameWorkerRetryDelayMs,
+  Number(process.env.FLOW_PROVIDER_WORKER_COOLDOWN_MS || 15 * 60 * 1000));
 function inlineWaitSetting(name, fallback) {
   const configured = Number(process.env[name] ?? process.env.FLOW_INLINE_WAIT_MS ?? fallback);
   return Number.isFinite(configured) ? Math.max(0, Math.min(30000, configured)) : fallback;
@@ -35,7 +41,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-03-image-continue-on-error-v1";
+const apiRelease = "2026-09-04-multi-worker-v1";
 const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
 const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION_WORKER_PREFIXES || "")
   .split(",")
@@ -98,8 +104,8 @@ function notifyTerminalJob(job) {
   for (const resolve of waiters || []) resolve(job);
 }
 
-function settleImagePromptFailure(job, index, error) {
-  job.results[index] = { ok: false, error };
+function settleImagePromptFailure(job, index, error, details = {}) {
+  job.results[index] = { ok: false, error, ...details };
   job.lease = null;
   const pending = job.results.some(result => result === null);
   if (pending) {
@@ -145,7 +151,45 @@ await database.executeMultiple(`
   );
   CREATE INDEX IF NOT EXISTS jobs_queue_idx ON jobs(worker, status, created_at);
   CREATE INDEX IF NOT EXISTS jobs_fair_queue_idx ON jobs(worker, status, updated_at, created_at);
+  CREATE TABLE IF NOT EXISTS extension_workers (
+    worker_id TEXT PRIMARY KEY,
+    machine_id TEXT NOT NULL,
+    version TEXT,
+    enabled INTEGER NOT NULL,
+    capabilities TEXT,
+    last_seen_at INTEGER NOT NULL,
+    last_claim_at INTEGER,
+    last_error TEXT
+  );
+  CREATE INDEX IF NOT EXISTS extension_workers_seen_idx ON extension_workers(last_seen_at);
 `);
+
+async function touchExtensionWorker({ workerId, machineId, version, enabled = true, capabilities }, executor = database) {
+  const normalized = normalizeCapabilities(capabilities);
+  await executor.execute({
+    sql: `INSERT INTO extension_workers(worker_id, machine_id, version, enabled, capabilities, last_seen_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(worker_id) DO UPDATE SET machine_id=excluded.machine_id, version=excluded.version,
+        enabled=excluded.enabled, capabilities=excluded.capabilities, last_seen_at=excluded.last_seen_at`,
+    args: [workerId, machineId || workerId, version || null, enabled ? 1 : 0,
+      normalized === null ? null : JSON.stringify(normalized), Date.now()]
+  });
+  return normalized;
+}
+
+async function extensionWorkerStats() {
+  const cutoff = Date.now() - workerOnlineSeconds * 1000;
+  const result = await database.execute({ sql: `SELECT worker_id, machine_id, version, enabled, capabilities,
+    last_seen_at, last_claim_at, last_error FROM extension_workers ORDER BY machine_id, worker_id`, args: [] });
+  return result.rows.map(row => ({
+    workerId: String(row.worker_id), machineId: String(row.machine_id), version: row.version || null,
+    enabled: Boolean(row.enabled), online: Number(row.last_seen_at) >= cutoff,
+    capabilities: row.capabilities ? JSON.parse(String(row.capabilities)) : null,
+    lastSeenAt: new Date(Number(row.last_seen_at)).toISOString(),
+    lastClaimAt: row.last_claim_at ? new Date(Number(row.last_claim_at)).toISOString() : null,
+    lastError: row.last_error || null
+  }));
+}
 
 const upsertJobSql = `
   INSERT INTO jobs(id, type, worker, status, created_at, updated_at, lease_expires_at, payload)
@@ -258,7 +302,7 @@ async function recoverInterruptedJobs() {
 
 await recoverInterruptedJobs();
 
-async function claimExtensionJob(workerId, requestedTypes) {
+async function claimExtensionJob(workerId, requestedTypes, capabilities) {
   const now = Date.now();
   const allowedTypes = new Set(["chat", "image", "video"]);
   const types = [...new Set((Array.isArray(requestedTypes) ? requestedTypes : [])
@@ -293,8 +337,12 @@ async function claimExtensionJob(workerId, requestedTypes) {
       const job = JSON.parse(String(row.payload));
       const index = job.results.findIndex(value => value === null);
       if (index < 0) continue;
+      if (!workerCanRun(job, capabilities) || !workerRetryReady(job, index, workerId, now)) continue;
       job.attempts ||= Array(job.prompts.length).fill(0);
-      const maxAttempts = (job.maxRetries ?? defaultMaxRetries) + 1;
+      const maxAttempts = Math.max(
+        (job.maxRetries ?? defaultMaxRetries) + 1,
+        Number(job.failoverMaxAttempts?.[index] || 0)
+      );
       if (job.attempts[index] >= maxAttempts) {
         const error = "Task hết lease và đã vượt số lần retry";
         if ((job.type || "image") === "image") {
@@ -313,12 +361,13 @@ async function claimExtensionJob(workerId, requestedTypes) {
       job.attempts[index] += 1;
       job.status = "running";
       job.startedAt ||= new Date().toISOString();
-      job.lease = { index, workerId, expiresAt: now + Math.max(job.timeoutMs, 300000) };
+      job.lease = { index, workerId, token: crypto.randomUUID(), expiresAt: now + Math.max(job.timeoutMs, 300000) };
       const batchSize = job.type === "image" ? (job.batchSize || imageBatchSize) : 1;
       const batch = Math.floor(index / batchSize) + 1;
       const batchTotal = Math.ceil(job.prompts.length / batchSize);
       job.logs.push(`${workerId} nhận prompt ${index + 1}/${job.prompts.length}${job.type === "image" ? `, nhóm ${batch}/${batchTotal}` : ""} (lần ${job.attempts[index]}/${maxAttempts})`);
       await saveJob(job, transaction);
+      await transaction.execute({ sql: "UPDATE extension_workers SET last_claim_at = ? WHERE worker_id = ?", args: [now, workerId] });
       await transaction.commit();
       return job;
     }
@@ -349,6 +398,15 @@ function sendHtml(res, status, body) {
   res.end(body);
 }
 
+function sendText(res, status, body, contentType = "text/plain; charset=utf-8") {
+  res.writeHead(status, {
+    "content-type": contentType,
+    "content-length": Buffer.byteLength(body),
+    "cache-control": "no-cache"
+  });
+  res.end(body);
+}
+
 function publicOrigin(req) {
   const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
   const proto = forwardedProto || (req.socket.encrypted ? "https" : "http");
@@ -371,12 +429,14 @@ function publicJob(job, req) {
   const responses = (job.results || []).map(result => result?.text).filter(text => typeof text === "string");
   const conversationUrls = (job.results || []).map(result => result?.conversationUrl).filter(Boolean);
   const failures = (job.results || []).flatMap((result, index) => result?.ok === false
-    ? [{ index: index + 1, error: result.error || "Lỗi không xác định" }]
+    ? [{ index: index + 1, code: result.errorCode || "extension_error", error: result.error || "Lỗi không xác định" }]
     : []);
   return {
     id: job.id, type: job.type || "image", mode: job.mode || null, status: job.status, ratio: job.ratio,
     outputs: job.type === "image" ? (job.outputs || 1) : null,
     batchSize: job.type === "image" ? (job.batchSize || imageBatchSize) : null,
+    provider: job.type === "chat" ? (job.provider || "gemini")
+      : job.type === "image" ? (job.provider || "flow") : null,
     model: job.model || null,
     total: job.prompts.length, createdAt: job.createdAt,
     startedAt: job.startedAt || null, finishedAt: job.finishedAt || null,
@@ -547,9 +607,12 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     if (url.pathname === "/health" && req.method === "GET") {
       const stats = await queueStats();
+      const extensionWorkers = await extensionWorkerStats();
       return send(res, 200, {
         ok: true, release: apiRelease, running, queued: stats.queued, queue: stats,
-        extensionWorkers: { allowedPrefixes: allowedExtensionWorkerPrefixes },
+        extensionWorkers: { allowedPrefixes: allowedExtensionWorkerPrefixes,
+          online: extensionWorkers.filter(worker => worker.online && worker.enabled).length,
+          total: extensionWorkers.length },
         database: { type: "turso", persistent: true, connected: true },
         storage: { configured: s3Configured, bucket: s3Configured ? s3Bucket : null }
       });
@@ -557,6 +620,14 @@ const server = http.createServer(async (req, res) => {
     if ((url.pathname === "/docs" || url.pathname === "/docs/") && req.method === "GET") {
       const html = await fs.readFile(path.join(root, "docs", "index.html"), "utf8");
       return sendHtml(res, 200, html);
+    }
+    if (url.pathname === "/llms.txt" && req.method === "GET") {
+      const guide = await fs.readFile(path.join(root, "docs", "llms.txt"), "utf8");
+      return sendText(res, 200, guide);
+    }
+    if (url.pathname === "/openapi.json" && req.method === "GET") {
+      const schema = await fs.readFile(path.join(root, "docs", "openapi.json"), "utf8");
+      return sendText(res, 200, schema, "application/json; charset=utf-8");
     }
     if (!authorized(req)) return send(res, 401, { error: "Unauthorized" });
 
@@ -585,6 +656,10 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/generate" && req.method === "POST") {
       const body = await readJson(req);
+      const provider = String(body.provider || "flow").toLowerCase();
+      if (!new Set(["flow", "chatgpt"]).has(provider)) {
+        return send(res, 400, { error: "provider chỉ nhận flow hoặc chatgpt" });
+      }
       const prompts = Array.isArray(body.prompts) ? body.prompts : body.prompt ? [body.prompt] : [];
       if (!prompts.length || prompts.some(x => typeof x !== "string" || !x.trim())) return send(res, 400, { error: "Cần prompt hoặc prompts[]" });
       if (prompts.length > maxPrompts) return send(res, 400, { error: `Tối đa ${maxPrompts} prompt/job` });
@@ -599,6 +674,12 @@ const server = http.createServer(async (req, res) => {
       if (outputs > 1 && worker !== "extension") {
         return send(res, 400, { error: "outputs lớn hơn 1 hiện chỉ hỗ trợ worker extension" });
       }
+      if (provider === "chatgpt" && worker !== "extension") {
+        return send(res, 400, { error: "Tạo ảnh ChatGPT chỉ hỗ trợ worker extension" });
+      }
+      if (provider === "chatgpt" && outputs !== 1) {
+        return send(res, 400, { error: "Tạo ảnh ChatGPT hiện chỉ hỗ trợ outputs = 1" });
+      }
       const requestedImages = prompts.length * outputs;
       if (requestedImages > maxImagesPerJob) {
         return send(res, 400, {
@@ -608,15 +689,16 @@ const server = http.createServer(async (req, res) => {
       const referenceImageUrl = body.referenceImageUrl ? String(body.referenceImageUrl) : null;
       if (referenceImageUrl && !/^https?:\/\//i.test(referenceImageUrl)) return send(res, 400, { error: "referenceImageUrl phải là URL HTTP(S)" });
       if (referenceImageUrl && worker !== "extension") return send(res, 400, { error: "Ảnh tham chiếu hiện chỉ hỗ trợ worker extension" });
+      if (referenceImageUrl && provider === "chatgpt") return send(res, 400, { error: "Ảnh tham chiếu ChatGPT chưa được hỗ trợ" });
       const delayMs = Math.max(5000, Number(body.delayMs || 15000));
       const timeoutMs = Math.max(30000, Number(body.timeoutMs || 180000));
-      if (!flowProjectUrl) {
+      if (provider === "flow" && !flowProjectUrl) {
         return send(res, 503, { error: "Backend chưa cấu hình FLOW_PROJECT_URL là URL project Flow hợp lệ" });
       }
-      const projectUrl = flowProjectUrl;
+      const projectUrl = provider === "flow" ? flowProjectUrl : null;
       const maxRetries = Math.max(0, Math.min(5, Number(body.maxRetries ?? defaultImageMaxRetries)));
       const identity = idempotentIdentity(req, body, "image", {
-        prompts: prompts.map(x => x.trim()), ratio, outputs, worker, referenceImageUrl,
+        prompts: prompts.map(x => x.trim()), provider, ratio, outputs, worker, referenceImageUrl,
         delayMs, timeoutMs, projectUrl, maxRetries
       });
       const duplicate = await findIdempotentJob(identity);
@@ -629,7 +711,7 @@ const server = http.createServer(async (req, res) => {
       if (await queuedCount() >= maxQueued) return send(res, 429, { error: `Hàng đợi đã đầy (${maxQueued} job)` });
       const id = identity?.id || `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
       const job = {
-        id, type: "image", prompts: prompts.map(x => x.trim()), ratio, outputs,
+        id, type: "image", provider, prompts: prompts.map(x => x.trim()), ratio, outputs,
         delayMs, timeoutMs, projectUrl,
         worker: worker === "extension" ? extensionQueueWorker : worker,
         referenceImageUrl, status: "queued", createdAt: new Date().toISOString(), logs: [], images: [],
@@ -666,19 +748,32 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: "Cần prompt hoặc prompts[]" });
       }
       if (prompts.length > maxPrompts) return send(res, 400, { error: `Tối đa ${maxPrompts} prompt/job` });
-      const model = String(body.model || "3.5-flash-lite").toLowerCase();
-      if (!new Set(["3.5-flash-lite", "3.1-pro"]).has(model)) {
-        return send(res, 400, { error: "model chỉ nhận 3.5-flash-lite hoặc 3.1-pro" });
+      const provider = String(body.provider || "gemini").toLowerCase();
+      if (!new Set(["gemini", "chatgpt"]).has(provider)) {
+        return send(res, 400, { error: "provider chỉ nhận gemini hoặc chatgpt" });
+      }
+      const model = String(body.model || (provider === "chatgpt" ? "default" : "3.5-flash-lite")).toLowerCase();
+      if (provider === "gemini" && !new Set(["3.5-flash-lite", "3.1-pro"]).has(model)) {
+        return send(res, 400, { error: "model Gemini chỉ nhận 3.5-flash-lite hoặc 3.1-pro" });
+      }
+      if (provider === "chatgpt" && model !== "default") {
+        return send(res, 400, { error: "model ChatGPT hiện chỉ nhận default" });
       }
       const timeoutMs = Math.max(30000, Number(body.timeoutMs || 300000));
-      const chatUrl = String(body.chatUrl || process.env.GEMINI_CHAT_URL || "https://gemini.google.com/app");
+      const defaultChatUrl = provider === "chatgpt"
+        ? (process.env.CHATGPT_CHAT_URL || "https://chatgpt.com/")
+        : (process.env.GEMINI_CHAT_URL || "https://gemini.google.com/app");
+      const chatUrl = String(body.chatUrl || defaultChatUrl);
       const newConversation = body.newConversation !== false;
       const maxRetries = Math.max(0, Math.min(5, Number(body.maxRetries ?? defaultMaxRetries)));
-      if (!/^https:\/\/gemini\.google\.com\//i.test(chatUrl)) {
-        return send(res, 400, { error: "chatUrl phải thuộc https://gemini.google.com/" });
+      const allowedChatUrl = provider === "chatgpt"
+        ? /^https:\/\/chatgpt\.com\//i.test(chatUrl)
+        : /^https:\/\/gemini\.google\.com\//i.test(chatUrl);
+      if (!allowedChatUrl) {
+        return send(res, 400, { error: `chatUrl phải thuộc ${provider === "chatgpt" ? "https://chatgpt.com/" : "https://gemini.google.com/"}` });
       }
       const identity = idempotentIdentity(req, body, "chat", {
-        prompts: prompts.map(x => x.trim()), model, newConversation, chatUrl, timeoutMs, maxRetries
+        prompts: prompts.map(x => x.trim()), provider, model, newConversation, chatUrl, timeoutMs, maxRetries
       });
       const duplicate = await findIdempotentJob(identity);
       if (duplicate?.conflict) {
@@ -692,6 +787,7 @@ const server = http.createServer(async (req, res) => {
       const job = {
         id,
         type: "chat",
+        provider,
         prompts: prompts.map(x => x.trim()),
         ratio: null,
         timeoutMs,
@@ -835,7 +931,14 @@ const server = http.createServer(async (req, res) => {
       if (!isAllowedExtensionWorker(workerId)) {
         return send(res, 200, { task: null });
       }
-      const job = await claimExtensionJob(workerId, body.types);
+      const capabilities = await touchExtensionWorker({
+        workerId,
+        machineId: String(body.machineId || workerId).slice(0, 100),
+        version: String(body.version || "").slice(0, 40),
+        enabled: body.enabled !== false,
+        capabilities: body.capabilities
+      });
+      const job = body.enabled === false ? null : await claimExtensionJob(workerId, body.types, capabilities);
       if (job) {
         const index = job.lease.index;
         return send(res, 200, {
@@ -845,12 +948,33 @@ const server = http.createServer(async (req, res) => {
             ratio: job.ratio, outputs: job.outputs || 1,
             projectUrl: job.projectUrl, referenceImageUrl: job.referenceImageUrl,
             mode: job.mode || null, sourceFlowUrl: job.sourceFlowUrl || null,
-            chatUrl: job.chatUrl, newConversation: job.newConversation, model: job.model,
-            timeoutMs: job.timeoutMs
+            provider: job.provider || ((job.type || "image") === "image" ? "flow" : "gemini"), chatUrl: job.chatUrl,
+            newConversation: job.newConversation, model: job.model,
+            timeoutMs: job.timeoutMs,
+            leaseToken: job.lease.token
           }
         });
       }
       return send(res, 200, { task: null });
+    }
+
+    if (url.pathname === "/extension/heartbeat" && req.method === "POST") {
+      const body = await readJson(req);
+      const machineId = String(body.machineId || "chrome-worker").slice(0, 100);
+      const version = String(body.version || "").slice(0, 40);
+      const workers = Array.isArray(body.workers) ? body.workers.slice(0, 3) : [];
+      let accepted = 0;
+      for (const worker of workers) {
+        const workerId = String(worker?.workerId || "").slice(0, 100);
+        if (!workerId || !isAllowedExtensionWorker(workerId)) continue;
+        await touchExtensionWorker({
+          workerId, machineId, version,
+          enabled: body.enabled !== false,
+          capabilities: worker.capabilities
+        });
+        accepted += 1;
+      }
+      return send(res, 200, { ok: true, accepted });
     }
 
     if (url.pathname === "/extension/result" && req.method === "POST") {
@@ -860,7 +984,9 @@ const server = http.createServer(async (req, res) => {
       if (!job || !isExtensionJob(job) || !Number.isInteger(index) || index < 0 || index >= job.prompts.length) {
         return send(res, 404, { error: "Task không tồn tại" });
       }
-      if (!job.lease || job.lease.index !== index) return send(res, 409, { error: "Task không còn lease" });
+      if (!job.lease || job.lease.index !== index || (job.lease.token && body.leaseToken !== job.lease.token)) {
+        return send(res, 409, { error: "Task không còn lease hoặc lease token không hợp lệ" });
+      }
       const submittedImageUrls = Array.isArray(body.imageUrls) ? body.imageUrls.map(String).filter(Boolean) : [];
       const submittedImageUrl = body.imageUrl ? String(body.imageUrl) : null;
       if (submittedImageUrl && !submittedImageUrls.includes(submittedImageUrl)) submittedImageUrls.unshift(submittedImageUrl);
@@ -880,22 +1006,45 @@ const server = http.createServer(async (req, res) => {
             videoUrl: body.videoUrl ? String(body.videoUrl) : null,
             objectKey: body.objectKey ? String(body.objectKey) : null,
             flowUrl: body.flowUrl ? String(body.flowUrl) : null,
+            conversationUrl: body.conversationUrl ? String(body.conversationUrl) : null,
             durationSeconds: Number.isFinite(Number(body.durationSeconds)) ? Number(body.durationSeconds) : null
           }
-        : { ok: false, error: String(body.error || "Lỗi extension") };
+        : {
+            ok: false,
+            error: String(body.error || "Lỗi extension"),
+            errorCode: body.errorCode ? String(body.errorCode) : "extension_error",
+            retryable: body.retryable !== false
+          };
       if (body.ok) job.results[index] = result;
       if (body.ok && job.type === "chat" && body.conversationUrl) {
         job.chatUrl = String(body.conversationUrl);
       }
+      const leaseWorkerId = job.lease.workerId;
       job.logs.push(body.ok ? `Prompt ${index + 1} hoàn tất` : `Prompt ${index + 1} lỗi: ${result.error}`);
       job.lease = null;
       if (!body.ok) {
-        const maxAttempts = (job.maxRetries ?? defaultMaxRetries) + 1;
-        if ((job.attempts?.[index] || 1) < maxAttempts) {
+        job.workerRetryAfter ||= {};
+        job.workerRetryAfter[index] ||= {};
+        const providerQuota = result.errorCode === "provider_quota";
+        job.workerRetryAfter[index][leaseWorkerId] = Date.now() +
+          (providerQuota ? providerWorkerCooldownMs : sameWorkerRetryDelayMs);
+        if (providerQuota && providerFailoverRetries > 0 && !job.failoverMaxAttempts?.[index]) {
+          job.failoverMaxAttempts ||= {};
+          job.failoverMaxAttempts[index] = (job.attempts?.[index] || 1) + providerFailoverRetries;
+          job.logs.push(`Tài khoản của ${leaseWorkerId} hết quota; ưu tiên chuyển sang extension khác`);
+        }
+        const maxAttempts = Math.max(
+          (job.maxRetries ?? defaultMaxRetries) + 1,
+          Number(job.failoverMaxAttempts?.[index] || 0)
+        );
+        if (result.retryable && (job.attempts?.[index] || 1) < maxAttempts) {
           job.status = "queued";
-          job.logs.push(`Đưa prompt ${index + 1} về hàng đợi để retry`);
+          job.logs.push(`Đưa prompt ${index + 1} về hàng đợi để extension khác retry`);
         } else if ((job.type || "image") === "image") {
-          settleImagePromptFailure(job, index, result.error);
+          settleImagePromptFailure(job, index, result.error, {
+            errorCode: result.errorCode,
+            retryable: result.retryable
+          });
         } else {
           job.results[index] = result;
           job.status = "failed";
@@ -914,7 +1063,12 @@ const server = http.createServer(async (req, res) => {
         job.finishedAt = new Date().toISOString();
       }
       await saveJob(job);
+      await database.execute({ sql: "UPDATE extension_workers SET last_error = ? WHERE worker_id = ?", args: [body.ok ? null : result.error, leaseWorkerId] });
       return send(res, 200, { ok: true, status: job.status });
+    }
+
+    if (url.pathname === "/extension/workers" && req.method === "GET") {
+      return send(res, 200, { workers: await extensionWorkerStats(), onlineSeconds: workerOnlineSeconds });
     }
 
     if ((url.pathname === "/extension/image" || url.pathname === "/extension/media") && req.method === "POST") {

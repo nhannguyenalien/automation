@@ -34,16 +34,23 @@ Kiểm tra bằng `curl http://127.0.0.1:8787/health`. Log nằm trong
 `logs/flow-api.log` và `logs/flow-api.error.log`. Khi LaunchAgent đang chạy thì
 không mở thêm `node flow_api.mjs`, nếu không sẽ gặp `EADDRINUSE`.
 
-Không đóng terminal này khi test local.
+Nếu chạy foreground bằng `npm run api`, phải giữ terminal đó mở. Nếu dùng LaunchAgent thì có thể đóng terminal; tiến trình được `launchd` quản lý.
 
 ### Chrome worker
 
 1. Mở Chrome bằng profile đã đăng nhập Google Pro.
 2. Kiểm tra extension đang Enabled tại `chrome://extensions`.
 3. Mở popup extension và kiểm tra API URL/key.
-4. Bật worker và bấm lưu.
-5. Giữ hai tab Flow cùng project và một tab `https://gemini.google.com/app` mở.
-6. Xác nhận cả Flow và Gemini đều đã đăng nhập trong cùng Chrome profile. Extension gán riêng tab **Flow Image** và **Flow Video**, bấm mục tương ứng ở sidebar, rồi kiểm tra loại trình tạo trong popup cấu hình. Sidebar chỉ lọc thư viện; với tab mới hoặc vừa bị reset, extension sẽ chọn **Hình ảnh**/**Video** trong popup đúng một lần và giữ nguyên cho các job sau.
+4. Chọn đúng các model/API tài khoản máy này được phép dùng, bật worker và bấm lưu. Mỗi máy phải có Worker ID riêng.
+5. Giữ hai tab Flow cùng project, một tab `https://gemini.google.com/app` và một tab `https://chatgpt.com/` mở nếu dùng ChatGPT.
+6. Xác nhận Flow, Gemini và ChatGPT đều đã đăng nhập trong cùng Chrome profile. Extension gán riêng tab **Flow Image** và **Flow Video**; job ảnh ChatGPT luôn bắt đầu ở conversation mới để không nhận nhầm output cũ.
+
+Với cụm nhiều máy, lặp lại các bước trên cho từng máy nhưng dùng Worker ID khác nhau. Xem inventory và heartbeat bằng:
+
+```bash
+curl -sS http://127.0.0.1:8787/extension/workers \
+  -H 'Authorization: Bearer local-test-key'
+```
 
 ## Smoke test sau khi khởi động
 
@@ -61,7 +68,7 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
   -H 'Content-Type: application/json' \
   --data '{
     "worker":"extension",
-    "projectUrl":"https://labs.google/fx/vi/tools/flow/project/PROJECT_ID",
+    "provider":"flow",
     "ratio":"1:1",
     "outputs":1,
     "prompt":"A simple red apple on a white background"
@@ -109,13 +116,36 @@ curl -sS -X POST http://127.0.0.1:8787/chat \
 
 Sau khi extension chọn 3.1 Pro, picker thu gọn có thể hiện **Pro Mở rộng**; đây là trạng thái hợp lệ. Kiểm tra response và conversation URL giống bước trên.
 
+### 6. ChatGPT web
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/chat \
+  -H 'Authorization: Bearer your-secret' \
+  -H 'Content-Type: application/json' \
+  --data '{"provider":"chatgpt","model":"default","newConversation":true,"prompt":"Trả lời đúng một dòng: CHATGPT_WEB_OK"}'
+```
+
+Kết quả đạt khi job `completed`, `responses[0]` chứa chuỗi yêu cầu và `conversationUrl` thuộc `https://chatgpt.com/`.
+
+### 7. Tạo ảnh bằng ChatGPT web
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/generate \
+  -H 'Authorization: Bearer your-secret' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: chatgpt-image-smoke-UNIQUE_ID' \
+  --data '{"provider":"chatgpt","worker":"extension","outputs":1,"prompt":"A solid blue circle centered on a white background, no text"}'
+```
+
+Kết quả đạt khi job chuyển thành `completed`, `images` chứa đúng một URL S3 mở được và `conversationUrl` thuộc `https://chatgpt.com/`. Trên tab ChatGPT phải thấy công cụ tạo ảnh được bật và xuất hiện một ảnh mới. Nếu tải URL ảnh ký của ChatGPT thất bại, kiểm tra lỗi trong service worker của extension và thử mở URL đó trong cùng Chrome profile.
+
 ## Reload đúng cách sau khi sửa extension
 
 1. Mở `chrome://extensions`.
 2. Bấm **Reload** trên Google AI Browser Worker.
-3. Không cần reload Flow/Gemini thủ công trong đa số trường hợp: worker sẽ thử ping và tự reload tab nếu content script chưa sẵn sàng.
+3. Không cần reload Flow/Gemini/ChatGPT thủ công trong đa số trường hợp: worker sẽ thử ping và tự reload tab nếu content script chưa sẵn sàng.
    Sau khi source extension đã sửa xong, chỉ bấm Reload extension một lần; không reload tab Flow liên tục trong lúc job đang tạo.
-4. Nếu muốn kiểm tra ngay trên tab đang mở, refresh tab Flow/Gemini một lần sau khi reload extension.
+4. Nếu muốn kiểm tra ngay trên tab đang mở, refresh tab Flow/Gemini/ChatGPT một lần sau khi reload extension.
 5. Nếu job đã claim trước khi reload extension, đợi lease hết hoặc restart API và gửi job mới trong môi trường test.
 
 ## Theo dõi job
@@ -224,13 +254,13 @@ API và extension/client đang dùng khác key. Whitespace cũng được tính 
 
 Extension trả kết quả quá muộn, gửi trùng, hoặc API/job đã đổi state. Không có retry endpoint; trong bản hiện tại hãy gửi job mới.
 
-### Video nối xuất hiện rồi mất sau reload
+### Video-to-video xuất hiện rồi mất sau reload
 
-Đừng coi timeline 16 giây vừa xuất hiện ngay sau khi bấm **Tạo** là hoàn tất. Chỉ dùng kết quả khi job API đã `completed`, có `flowUrl`, `videos[]` và `durationSeconds` đã tăng. Worker đợi UI render thật trước khi trả kết quả. Khi nối đoạn tiếp theo, dùng chính `flowUrl` trả về; không dùng public URL MP4/S3. Không gửi đồng thời hai job `/video/extend` cho cùng một scene.
+Đừng coi timeline 16 giây vừa xuất hiện ngay sau khi bấm **Tạo** là hoàn tất. Worker sẽ hard reload đúng scene, xác minh thời lượng tăng và khung hình lưu vẫn tồn tại, rồi mới tải/upload MP4 và trả `completed`. Chỉ dùng kết quả khi job có `flowUrl`, `videos[]` và `durationSeconds` đã tăng. Khi nối đoạn tiếp theo, dùng chính `flowUrl` trả về; không dùng public URL MP4/S3. Không gửi đồng thời hai job `/video/extend` cho cùng một scene.
 
 ### `404 Không tìm thấy job`
 
-Job ID sai hoặc API đã restart. Job extension chỉ nằm trong RAM.
+Job ID sai, client đang gọi nhầm API/Turso, hoặc job đã bị cleanup. Job extension được lưu trên Turso nên restart API không tự làm mất trạng thái.
 
 ### File output không thấy
 
@@ -256,21 +286,21 @@ Nếu lỗi selector/tương quan này xảy ra trong một batch, extension t�
 
 ### Ảnh tham chiếu URL ngoài không tải được
 
-Extension hiện chỉ có host permissions cho localhost/127.0.0.1 và Google Flow. Cách chắc chắn hiện tại là upload ảnh vào `POST /assets`, sau đó dùng URL asset trả về. Khi triển khai remote phải cập nhật `host_permissions` theo domain API HTTPS.
+Extension hiện cho phép tải URL HTTPS và URL localhost/127.0.0.1. Tuy vậy host ảnh ngoài có thể chặn hotlink, yêu cầu cookie hoặc trả MIME sai. Cách chắc chắn là upload ảnh vào `POST /assets`, sau đó dùng URL asset trả về; extension tự gửi API key khi asset cùng origin với API đã cấu hình.
 
 ## Dừng và khởi động lại
 
 ### Dừng API
 
-Nhấn `Ctrl+C` tại terminal API. Việc này làm mất queue và job status trong RAM, nhưng không xóa asset/output trên disk.
+Nếu chạy foreground, nhấn `Ctrl+C` tại terminal API. Nếu chạy LaunchAgent, dùng `launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.schoolsai.flow-api.plist`. Queue và job status vẫn ở Turso; asset local và output S3 không bị xóa.
 
 ### Khởi động lại an toàn
 
 1. Không restart khi Flow đang tạo ảnh nếu có thể.
 2. Dừng nhận job mới ở phía client.
 3. Đợi job hiện tại hoàn tất.
-4. Dừng API, chạy lại với cùng config.
-5. Gửi smoke test mới; job ID cũ không còn truy cập được.
+4. Dừng API, chạy lại với cùng config/Turso.
+5. Kiểm tra job cũ bằng `GET /jobs/:id`; job `running` hết lease sẽ được đưa lại về queue. Sau đó gửi một smoke test mới.
 
 ## Cleanup
 
@@ -291,6 +321,7 @@ Không xóa Chrome profile nếu chưa backup/đăng nhập lại được. Chro
 - Node/npm đúng phiên bản và `npm install` thành công.
 - Chrome đã đăng nhập tài khoản được phép dùng Flow.
 - Gemini đã đăng nhập và chat thủ công được trong cùng profile.
+- ChatGPT đã đăng nhập, chat và tạo ảnh thủ công được nếu bật provider ChatGPT.
 - Extension load unpacked thành công.
 - API key mới, không phải key từng lộ trong chat/source.
 - `projectUrl` trỏ tới project tồn tại.
@@ -301,11 +332,13 @@ Không xóa Chrome profile nếu chưa backup/đăng nhập lại được. Chro
 - Batch 3 prompt pass.
 - Gemini Chat `default` smoke test pass.
 - Gemini Chat `3.1-pro` smoke test pass.
+- ChatGPT Chat smoke test pass.
+- ChatGPT text-to-image smoke test pass và URL S3 mở được.
 - Có giám sát dung lượng Downloads và asset store.
-- Người vận hành biết job state mất khi API restart.
+- Người vận hành biết job state nằm trên Turso và job đang chạy sẽ được requeue sau restart/hết lease.
 
 ## Khuyến nghị triển khai hiện tại
 
 Cho giai đoạn test: giữ API và Chrome extension trên cùng một máy, API bind `127.0.0.1`. Đây là cấu hình đơn giản nhất và phù hợp permissions hiện tại.
 
-Cho production sau này: dùng một VM Linux riêng có Chrome UI/persistent profile, API/queue bền vững và object storage. Giữ ba tab cố định: Gemini Chat, Flow Image và Flow Video. Extension tự gán tab theo lane và chỉ xử lý một task trên mỗi tab tại một thời điểm; ảnh và video có thể chạy song song vì không dùng chung tab Flow. Không chỉ đặt Chrome trong container stateless; session, Downloads, display và browser profile cần volume/persistence rõ ràng. Tạo bucket/policy bằng admin một lần, sau đó chạy API bằng service account chỉ có quyền ghi/đọc cần thiết trên bucket đó.
+Cho production sau này: dùng một VM Linux riêng có Chrome UI/persistent profile, API/queue bền vững và object storage. Giữ các tab Flow Image, Flow Video, Gemini và ChatGPT đã đăng nhập. Extension tự gán tab theo lane và chỉ xử lý một task trên mỗi tab tại một thời điểm; ảnh và video Flow có thể chạy song song vì không dùng chung tab. Không chỉ đặt Chrome trong container stateless; session, Downloads, display và browser profile cần volume/persistence rõ ràng. Tạo bucket/policy bằng admin một lần, sau đó chạy API bằng service account chỉ có quyền ghi/đọc cần thiết trên bucket đó.

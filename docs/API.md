@@ -36,6 +36,7 @@ curl -sS http://127.0.0.1:8787/health
   "ok": true,
   "running": false,
   "queued": 0,
+  "extensionWorkers": { "online": 3, "total": 3 },
   "storage": {
     "configured": true,
     "bucket": "flow-images"
@@ -43,7 +44,13 @@ curl -sS http://127.0.0.1:8787/health
 }
 ```
 
-`running` và `queued` chủ yếu phản ánh queue Playwright; không phải số extension worker đang online.
+`running` là cờ của worker Playwright nội bộ, còn `queued` tương thích ngược với số job đang chờ. `extensionWorkers.online` đếm các lane extension đang bật và còn heartbeat; dùng object `queue` để xem tổng job theo trạng thái.
+
+## `GET /extension/workers`
+
+Trả inventory các lane Chrome, Worker ID/machine ID, version, capability, online, lần claim gần nhất và lỗi gần nhất. Endpoint yêu cầu API key và dành cho vận hành cụm worker.
+
+Extension tự dùng `POST /extension/heartbeat`, `POST /extension/claim`, `POST /extension/media` và `POST /extension/result`; client ứng dụng không gọi các endpoint protocol này.
 
 ## `POST /assets`
 
@@ -86,13 +93,13 @@ curl -sS \
 
 ## Contract chung: trả ngay nếu nhanh, trả job nếu lâu
 
-`POST /generate`, `POST /chat` và `POST /video` dùng cùng một contract:
+`POST /generate`, `POST /chat`, `POST /video` và `POST /video/extend` dùng cùng một contract:
 
 - API chờ bằng event nội bộ, không poll Turso: chat mặc định 20 giây (`FLOW_CHAT_INLINE_WAIT_MS`), image và video mặc định 2 giây (`FLOW_IMAGE_INLINE_WAIT_MS`, `FLOW_VIDEO_INLINE_WAIT_MS`). Mỗi giá trị tối đa 30 giây.
 - Nếu job chuyển sang `completed` hoặc `failed` trong khoảng đó: trả HTTP `200` với trạng thái và dữ liệu cuối cùng.
 - Nếu job còn `queued` hoặc `running`: trả HTTP `202`, trường `id`, header `Location: /jobs/<id>` và `Retry-After`.
 - Client luôn đọc JSON trước. Nếu `status` là `completed` hoặc `failed` thì dừng; nếu chưa xong, lưu `id` và gọi `GET /jobs/:id` sau.
-- Cả ba endpoint đều hỗ trợ `Idempotency-Key`. Nếu POST mất response, retry đúng payload và cùng key sẽ nhận lại job cũ.
+- Cả bốn endpoint đều hỗ trợ `Idempotency-Key`. Nếu POST mất response, retry đúng payload và cùng key sẽ nhận lại job cũ.
 
 Như vậy client không cần chọn trước sync hay async và không cần giữ kết nối 10–20 phút.
 
@@ -108,6 +115,7 @@ Tạo ảnh. Dùng `prompt` cho một ảnh hoặc `prompts` cho batch; response
 |---|---|---:|---|
 | `prompt` | string | một trong hai | Một prompt |
 | `prompts` | string[] | một trong hai | Danh sách prompt chạy tuần tự |
+| `provider` | string | không | `flow` (mặc định) hoặc `chatgpt` |
 | `worker` | string | không | `extension` hoặc `playwright` |
 | `ratio` | string | không | Mặc định `16:9` |
 | `outputs` | integer | không | `1`–`4`, mặc định `1`; số ảnh tạo cho mỗi prompt; giá trị lớn hơn 1 chỉ hỗ trợ extension |
@@ -120,6 +128,8 @@ Nên gửi header `Idempotency-Key` duy nhất cho mỗi yêu cầu logic. Nếu
 
 ### Text-to-image
 
+Flow là provider mặc định. Để tạo ảnh bằng phiên đăng nhập ChatGPT web, đặt `provider: "chatgpt"`. ChatGPT hiện chỉ hỗ trợ `worker: "extension"`, `outputs: 1` và chưa hỗ trợ `referenceImageUrl`; model/tỉ lệ thực tế theo giao diện và quyền của tài khoản ChatGPT.
+
 ```bash
 curl -sS -X POST http://127.0.0.1:8787/generate \
   -H 'Authorization: Bearer local-test-key' \
@@ -130,6 +140,21 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
     "ratio": "16:9",
     "outputs": 1,
     "prompt": "A cinematic robot cat walking in Hoi An"
+  }'
+```
+
+### Text-to-image bằng ChatGPT web
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/generate \
+  -H 'Authorization: Bearer local-test-key' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: chatgpt-image-UNIQUE_ID' \
+  --data '{
+    "provider": "chatgpt",
+    "worker": "extension",
+    "outputs": 1,
+    "prompt": "A solid blue circle centered on a white background, no text"
   }'
 ```
 
@@ -153,7 +178,7 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
 
 Image-to-image dùng cùng quy tắc `outputs: 1..4`; nếu không gửi field này thì mỗi prompt tạo một ảnh.
 
-Client không gửi `projectUrl`. Backend khóa project bằng biến môi trường `FLOW_PROJECT_URL` và từ chối tạo ảnh/video nếu biến này thiếu hoặc không phải URL project Flow hợp lệ.
+Client không gửi `projectUrl`. Backend khóa project bằng biến môi trường `FLOW_PROJECT_URL` và chỉ yêu cầu biến này cho ảnh/video dùng Flow; ảnh ChatGPT không phụ thuộc project Flow.
 
 Sau khi POST trả `id`, client chỉ poll `GET /jobs/:id`. Không gọi lại `POST /generate` để kiểm tra tiến trình. Một ảnh mới chủ ý phải dùng một `Idempotency-Key` mới.
 
@@ -177,11 +202,11 @@ Ví dụ response `202 Accepted` khi chưa xong:
 }
 ```
 
-Validation errors trả `400`, ví dụ prompt rỗng, ratio sai, `outputs` ngoài 1–4, worker sai, quá số prompt, URL ảnh không phải HTTP(S), hoặc dùng ảnh tham chiếu/`outputs > 1` với Playwright.
+Validation errors trả `400`, ví dụ prompt rỗng, provider/ratio/worker sai, `outputs` ngoài 1–4, quá số prompt, URL ảnh không phải HTTP(S), dùng ảnh tham chiếu/`outputs > 1` với Playwright, hoặc dùng ChatGPT với Playwright, ảnh tham chiếu hay `outputs > 1`.
 
 ## `POST /chat`
 
-Chat Gemini. Endpoint này luôn dùng extension worker và response theo contract chung `200/202`.
+Chat qua Gemini hoặc phiên đăng nhập ChatGPT web. Endpoint này luôn dùng extension worker và response theo contract chung `200/202`.
 
 ### Request fields
 
@@ -189,13 +214,26 @@ Chat Gemini. Endpoint này luôn dùng extension worker và response theo contra
 |---|---|---:|---|
 | `prompt` | string | một trong hai | Một câu lệnh |
 | `prompts` | string[] | một trong hai | Batch câu lệnh chạy tuần tự |
-| `model` | string | không | `3.5-flash-lite` hoặc `3.1-pro`; mặc định `3.5-flash-lite` |
+| `provider` | string | không | `gemini` (mặc định) hoặc `chatgpt` |
+| `model` | string | không | Gemini: `3.5-flash-lite`/`3.1-pro`; ChatGPT: `default` |
 | `newConversation` | boolean | không | Mặc định `true`; mở conversation mới cho prompt đầu |
-| `chatUrl` | string | khi tiếp tục chat | URL thuộc `https://gemini.google.com/` |
+| `chatUrl` | string | khi tiếp tục chat | URL thuộc origin của provider đã chọn |
 | `timeoutMs` | number | không | Tối thiểu 30000; mặc định 300000 |
 | `maxRetries` | integer | không | `0`–`5`; mặc định theo `FLOW_MAX_RETRIES` |
 
 Nếu bỏ `model`, extension vẫn chủ động chọn Gemini 3.5 Flash Lite, không giữ model cũ trên giao diện. `model: "3.1-pro"` chọn option 3.1 Pro; sau khi chọn, nhãn thu gọn trên UI có thể chỉ hiển thị **Pro Mở rộng**.
+
+Với ChatGPT, dùng `provider: "chatgpt"`; nếu bỏ `model`, API tự dùng `default`. Extension dùng model đang được tài khoản ChatGPT web cấp quyền.
+
+### Chat mới bằng ChatGPT web
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/chat \
+  -H 'Authorization: Bearer local-test-key' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: chatgpt-request-UNIQUE_ID' \
+  --data '{"provider":"chatgpt","newConversation":true,"prompt":"Trả lời đúng một dòng: CHATGPT_OK"}'
+```
 
 Mỗi request logic nên có header `Idempotency-Key` duy nhất. API luôn lưu job vào Turso trước khi phản hồi. Nếu job xong trong cửa sổ chờ ngắn, API trả HTTP `200` cùng kết quả; nếu chưa xong, API trả HTTP `202` cùng `id` để client gọi `GET /jobs/:id`. Nếu kết nối đứt trước khi nhận response, gửi lại **đúng payload và cùng key**: API trả job cũ với `deduplicated: true`, không tạo hoặc chạy thêm batch. Cùng key nhưng payload khác trả HTTP `409`.
 
@@ -270,6 +308,7 @@ Ví dụ response `202 Accepted` khi chưa xong:
 {
   "id": "chat-1788180000000-acde1234",
   "type": "chat",
+  "provider": "gemini",
   "status": "queued",
   "model": "3.1-pro",
   "total": 1,
@@ -379,9 +418,9 @@ Ví dụ kết quả video hoàn tất:
 }
 ```
 
-## `POST /video/extend`
+## Video-to-video — `POST /video/extend`
 
-Nối thêm một đoạn vào scene Flow bằng **Kéo dài (Veo 3.1 Lite)**. Flow tự dùng cảnh cuối của video nguồn làm cảnh đầu của đoạn mới.
+Đây là chế độ **video-to-video native theo scene Flow**: nối thêm một đoạn bằng **Kéo dài (Veo 3.1 Lite)**, và Flow tự dùng cảnh cuối của video nguồn làm cảnh đầu của đoạn mới. API không nhận `sourceVideoUrl`, file MP4 hay URL S3 làm nguồn; đầu vào bắt buộc là `sourceFlowUrl` của scene Flow.
 
 ```bash
 curl -sS -X POST https://nhans-macbook-pro-1.tail5d608a.ts.net/video/extend \
@@ -395,6 +434,8 @@ curl -sS -X POST https://nhans-macbook-pro-1.tail5d608a.ts.net/video/extend \
 ```
 
 `sourceFlowUrl` bắt buộc là URL scene Google Flow có dạng `/project/.../scene/...`; URL MP4/S3 không dùng được cho luồng native này. `prompt` là bắt buộc. `timeoutMs` mặc định 900.000 ms. `maxRetries` mặc định `0` vì retry sau khi Flow đã nhận thao tác có thể nối trùng clip.
+
+Job chỉ được đánh dấu `completed` sau khi extension hard reload đúng scene và xác minh thời lượng tăng cùng khung hình lưu vẫn tồn tại. Sau đó extension mới tải video và upload S3. Nếu đoạn nối chỉ hiện tạm rồi biến mất sau reload, job trả lỗi thay vì URL sai.
 
 Kết quả hoàn tất:
 
@@ -450,11 +491,11 @@ Response khi extension hoàn tất:
 }
 ```
 
-Chú ý: `progress` đếm prompt đã có result, không đếm từng ảnh. Luôn kiểm tra cả `status` và `error`. Khi job `completed`, `images` chứa public S3 URL theo thứ tự prompt rồi output; số URL kỳ vọng là `total * outputs`.
+Chú ý: `progress` đếm prompt đã có result, không đếm từng ảnh. Luôn kiểm tra cả `status`, `error` và `failures[]`. Mỗi failure có `index`, `code`, `error`; `code: "provider_quota"` nghĩa là tài khoản web đã hết lượt tạo ảnh, không phải lỗi selector và client không nên retry trước thời điểm reset ghi trong `error`. Khi job `completed`, `images` chứa public S3 URL theo thứ tự prompt rồi output; số URL kỳ vọng là `total * outputs`.
 
 Chống tạo trùng: POST `/generate`, `/chat` hoặc `/video` đúng một lần. Nếu nhận `200`, dùng kết quả ngay; nếu nhận `202`, lưu `id` rồi chỉ poll bằng GET. Nếu chưa chắc POST đầu tiên đã tới server, retry cùng `Idempotency-Key`; tuyệt đối không sinh key mới cho cùng một yêu cầu logic.
 
-Với job chat, cùng endpoint trả thêm `model`, `responses`, `response`, `conversationUrls` và `conversationUrl`; `images` sẽ rỗng. Với job video, `model` là `veo-3.1-lite`, `images` rỗng và kết quả nằm trong `videos`.
+Với job chat, cùng endpoint trả thêm `provider`, `model`, `responses`, `response`, `conversationUrls` và `conversationUrl`; `images` sẽ rỗng. Với job ảnh ChatGPT, `provider` là `chatgpt`, `images` chứa URL S3 và `conversationUrl` trỏ tới cuộc trò chuyện đã tạo ảnh. Với job video, `model` là `veo-3.1-lite`, `images` rỗng và kết quả nằm trong `videos`.
 
 ### Poll đến khi xong bằng shell
 

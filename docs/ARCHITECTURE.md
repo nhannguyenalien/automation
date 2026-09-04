@@ -2,7 +2,7 @@
 
 ## Mục tiêu hiện tại
 
-Biến phiên Google đã đăng nhập trong Chrome thành worker nội bộ cho ba loại job: tạo ảnh, tạo video bằng Google Flow và chat bằng Gemini. API producer không cần điều khiển browser trực tiếp.
+Biến phiên đăng nhập trong Chrome thành worker nội bộ cho ba loại job: tạo ảnh bằng Google Flow hoặc ChatGPT web, tạo video bằng Google Flow và chat bằng Gemini hoặc ChatGPT web. API producer không cần điều khiển browser trực tiếp.
 
 ```mermaid
 flowchart LR
@@ -12,9 +12,9 @@ flowchart LR
   C -->|"POST /video"| A
   E["Chrome extension worker"] -->|"poll /extension/claim"| A
   A -->|"image/chat/video task + URL + model"| E
-  E -->|"lane image"| F["Flow Image tab"]
+  E -->|"lane image"| F["Flow / ChatGPT Image tab"]
   E -->|"lane video"| V["Flow Video tab"]
-  E -->|"điều khiển tab"| G["Gemini Chat"]
+  E -->|"điều khiển tab"| G["Gemini / ChatGPT"]
   E -->|"download"| D["Chrome Downloads / flow-images"]
   E -->|"upload binary ảnh"| S["S3-compatible storage"]
   E -->|"POST /extension/result"| A
@@ -48,7 +48,7 @@ Runtime files:
 
 - poll API bằng Chrome Alarm khoảng 0,1 phút;
 - tải ảnh tham chiếu thành data URL;
-- tìm/mở tab Google Flow hoặc Gemini phù hợp theo loại task;
+- tìm/mở tab Google Flow, Gemini hoặc ChatGPT phù hợp theo loại task;
 - dùng Chrome Debugger Protocol để click, gõ text và gán file;
 - dùng Chrome Downloads API để lưu output ảnh và gửi binary về API để upload S3;
 - báo success/error về API.
@@ -76,9 +76,15 @@ Runtime files:
   đã biến mất và nội dung ổn định;
 - trả text cùng conversation URL về worker.
 
+### ChatGPT content script
+
+`flow-extension/chatgpt.js` chạy trong `https://chatgpt.com/*`, hỗ trợ chat và text-to-image. Với job ảnh, script bật công cụ **Create an image or sticker**, gửi prompt, chờ output mới ổn định rồi chuyển URL ảnh đã ký cho worker tải và upload lên storage.
+
 ### Extension popup
 
-Lưu `apiUrl`, `apiKey`, `workerId`, `enabled` vào `chrome.storage.local`.
+Lưu `apiUrl`, `apiKey`, `workerId`, `enabled` và danh sách capability provider/model vào `chrome.storage.local`. Mỗi máy có ba lane độc lập (chat/image/video), gửi heartbeat kể cả khi lane đang chạy job dài.
+
+Backend là scheduler chung cho nhiều máy: lọc job theo capability, cấp lease có token trong transaction Turso, và đặt cooldown theo worker khi lỗi để máy khác có thể claim. Lỗi quota provider được phép failover có giới hạn; lỗi ảnh không xác định vẫn giữ at-most-once mặc định để tránh ảnh trùng.
 
 ## Contract phản hồi chung
 
@@ -95,6 +101,8 @@ Nếu kết nối POST bị ngắt trước khi nhận response, client gửi l�
 Các request chờ được quản lý bằng waiter theo `jobId`. `saveJob` đánh thức waiter khi trạng thái chuyển sang `completed` hoặc `failed`; timeout chỉ thực hiện một lần đọc Turso cuối cùng để hỗ trợ completion từ API instance khác và đóng race lúc đăng ký waiter. Client đóng kết nối thì waiter được dọn ngay.
 
 ## Luồng text-to-image
+
+`provider: "flow"` dùng luồng Flow bên dưới. `provider: "chatgpt"` mở conversation ChatGPT mới, bật công cụ tạo ảnh, gửi prompt, đợi URL output mới ổn định rồi để service worker tải và upload ảnh lên S3. ChatGPT hiện giới hạn `worker: "extension"`, `outputs: 1` và không nhận `referenceImageUrl`.
 
 1. Client tạo job.
 2. Extension claim prompt chưa xử lý đầu tiên.
@@ -129,14 +137,17 @@ Một `referenceImageUrl` được dùng lại cho mọi prompt trong cùng job.
 
 Nếu job video không có `referenceImageUrl`, extension chọn **Video → Thành phần** và chạy luồng text-to-video hiện có. Một ảnh đầu được dùng lại cho mọi prompt trong cùng batch.
 
-## Luồng nối tiếp video
+## Luồng video-to-video (nối tiếp scene Flow)
+
+Đây là video-to-video native của Flow: nguồn phải là URL scene Flow, không phải file MP4 hay public URL S3 bất kỳ.
 
 1. Client gọi `POST /video/extend` với URL Flow `/scene/...` và một prompt.
 2. Worker khóa lane Video, mở chính xác scene nguồn và không quay về gallery dù có `FLOW_PROJECT_URL` mặc định.
 3. Content script chọn **Thêm đoạn trích video → Kéo dài (Veo 3.1 Lite)** và nhập prompt bằng chuỗi sự kiện bàn phím thật.
 4. Flow tự dùng cảnh cuối của clip hiện tại làm cảnh đầu clip mới.
-5. Script chỉ công nhận hoàn tất sau khi thời lượng tăng, UI lưu khung hình trở lại và thời gian render tối thiểu đã qua; đây là cách phân biệt timeline tạm với scene đã lưu thật.
-6. Extension tải MP4, upload S3 và trả cả `videoUrl`, `flowUrl` cùng `durationSeconds`. Client dùng `flowUrl` làm nguồn cho lần nối kế tiếp.
+5. Script chỉ công nhận lượt tạo ban đầu sau khi thời lượng tăng, UI lưu khung hình trở lại và thời gian render tối thiểu đã qua.
+6. Service worker hard reload đúng URL scene, chờ content script hoạt động lại và xác minh lần nữa rằng thời lượng tăng cùng khung hình lưu vẫn tồn tại. Timeline chỉ hiện tạm rồi mất sau reload bị coi là lỗi.
+7. Chỉ sau bước xác minh hậu reload, extension mới tải MP4, upload S3 và trả cả `videoUrl`, `flowUrl` cùng `durationSeconds`. Client dùng `flowUrl` làm nguồn cho lần nối kế tiếp.
 
 Mỗi request chỉ nối một đoạn và mặc định không retry để tránh tạo clip trùng. Các request cho cùng một scene phải chạy tuần tự.
 
@@ -194,7 +205,7 @@ URL cùng origin giúp extension tự thêm Bearer token và tránh phụ thuộ
 
 1. Retry có backoff, cancel và dead-letter state.
 2. Lifecycle/retention policy cho job và kết quả trong Turso.
-3. Worker heartbeat/online status và metrics.
+3. Metrics/alerting chi tiết theo worker và loại lỗi (heartbeat/online inventory đã có).
 4. API HTTPS, scoped token và network private.
 5. Cho phép cấu hình origin API trong manifest hoặc build manifest theo môi trường.
 6. Linux worker riêng để loại bỏ hành vi file chooser native macOS.

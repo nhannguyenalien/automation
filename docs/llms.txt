@@ -1,0 +1,78 @@
+# Google AI Browser API
+
+Machine-oriented quick guide for AI agents.
+
+Base URL: https://nhans-macbook-pro-1.tail5d608a.ts.net
+OpenAPI: https://nhans-macbook-pro-1.tail5d608a.ts.net/openapi.json
+Human docs: https://nhans-macbook-pro-1.tail5d608a.ts.net/docs
+
+## Authentication
+
+Execution endpoints require either:
+- Authorization: Bearer YOUR_API_KEY
+- X-API-Key: YOUR_API_KEY
+
+Never put the API key in a URL or log it. GET /health, /docs, /llms.txt and /openapi.json are public.
+
+## Required job pattern
+
+1. Send a unique Idempotency-Key with every POST.
+2. A POST returns HTTP 200 when completed quickly, or HTTP 202 while queued/running.
+3. Save response.id. For HTTP 202, poll GET /jobs/{id} after retryAfterSeconds.
+4. Stop at status completed or failed. Do not resend POST merely because work is slow.
+5. If the POST response was lost, retry the exact payload with the same Idempotency-Key.
+
+## Chat
+
+POST /chat
+Gemini JSON: {"provider":"gemini","prompt":"...","model":"3.5-flash-lite","newConversation":true}
+ChatGPT JSON: {"provider":"chatgpt","prompt":"...","model":"default","newConversation":true}
+Batch: use "prompts":["...","..."] instead of prompt.
+Providers/models: gemini (default) supports 3.5-flash-lite and 3.1-pro; chatgpt supports default.
+Result: response for one prompt or responses[] for a batch.
+
+## Text-to-image
+
+POST /generate
+Flow JSON: {"provider":"flow","prompt":"...","ratio":"16:9","outputs":1,"worker":"extension"}
+ChatGPT JSON: {"provider":"chatgpt","prompt":"...","outputs":1,"worker":"extension"}
+Batch: use prompts[]. Maximum 100 prompts per job. Default outputs is 1.
+Allowed ratios: 16:9, 4:3, 1:1, 3:4, 9:16.
+ChatGPT image currently requires extension, outputs=1, and no referenceImageUrl.
+Result: images[].
+
+## Upload a reference image
+
+POST /assets with raw JPEG, PNG or WebP bytes and the matching Content-Type.
+The response contains url. Use that URL as referenceImageUrl.
+
+## Image-to-image
+
+POST /generate
+JSON: {"prompt":"...","referenceImageUrl":"https://...","ratio":"16:9","outputs":1,"worker":"extension"}
+Result: images[].
+
+## Text-to-video
+
+POST /video
+JSON: {"prompt":"...","ratio":"16:9"}
+Allowed ratios: 16:9, 9:16. Each prompt creates one video.
+Result: videos[].
+
+## Image-to-video
+
+Upload the image with POST /assets, then POST /video:
+JSON: {"prompt":"...","referenceImageUrl":"https://...","ratio":"16:9"}
+Result: videos[].
+
+## Video-to-video / extend a Flow scene
+
+POST /video/extend
+JSON: {"sourceFlowUrl":"https://labs.google/fx/vi/tools/flow/project/PROJECT_ID/scene/SCENE_ID","prompt":"..."}
+sourceFlowUrl must be a Google Flow scene URL. Arbitrary MP4, S3 URLs and sourceVideoUrl are not accepted.
+Result: videos[], flowUrl and durationSeconds. For the next segment, use returned flowUrl as sourceFlowUrl.
+Run extensions sequentially for the same scene. Default retries are disabled.
+
+## Errors
+
+401 means the API key is missing or invalid. 4xx means correct the request and do not blindly retry. For status failed, inspect error, failures, and logs. A failure code of provider_quota is not a selector error; do not retry until the provider quota resets.
