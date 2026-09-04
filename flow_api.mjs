@@ -411,13 +411,15 @@ function sendText(res, status, body, contentType = "text/plain; charset=utf-8") 
 }
 
 function publicOrigin(req) {
+  const requestHost = req.headers.host || `${host}:${port}`;
   const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
   let cloudflareProto = "";
   try {
     cloudflareProto = JSON.parse(String(req.headers["cf-visitor"] || "{}"))?.scheme || "";
   } catch {}
-  const proto = forwardedProto || cloudflareProto || (req.socket.encrypted ? "https" : "http");
-  return `${proto}://${req.headers.host || `${host}:${port}`}`;
+  const internalHost = /^(?:localhost|127\.0\.0\.1|backend)(?::|$)/i.test(requestHost);
+  const proto = forwardedProto || cloudflareProto || (req.socket.encrypted || !internalHost ? "https" : "http");
+  return `${proto}://${requestHost}`;
 }
 
 function publicJob(job, req) {
