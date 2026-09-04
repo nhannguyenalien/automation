@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Google AI Browser Worker",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Nhận job API và điều khiển Google Flow, Gemini hoặc ChatGPT trong phiên Chrome đang đăng nhập.",
   "permissions": ["storage", "tabs", "downloads", "alarms", "debugger"],
   "host_permissions": [
@@ -10,18 +10,19 @@
     "http://backend/*",
     "https://*/*",
     "https://labs.google/*",
+    "https://flow.google.com/*",
     "https://gemini.google.com/*",
     "https://chatgpt.com/*",
     "https://*.googleusercontent.com/*"
   ],
   "background": { "service_worker": "worker.js", "type": "module" },
   "content_scripts": [{
-    "matches": ["https://labs.google/fx/*"],
+    "matches": ["https://labs.google/fx/*", "https://flow.google.com/*"],
     "js": ["flow-page-bridge.js"],
     "run_at": "document_start",
     "world": "MAIN"
   }, {
-    "matches": ["https://labs.google/fx/*"],
+    "matches": ["https://labs.google/fx/*", "https://flow.google.com/*"],
     "js": ["flow.js"],
     "run_at": "document_idle"
   }, {

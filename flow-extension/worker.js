@@ -1,5 +1,6 @@
 import { runtimeDefaults } from "./runtime-config.js";
 import { canRetryLane, createLaneBlock } from "./lane-recovery.js";
+import { isSameFlowProject, parseFlowUrl } from "./flow-url.js";
 
 const defaults = {
   apiUrl: runtimeDefaults.apiUrl || "http://127.0.0.1:8787",
@@ -74,23 +75,14 @@ async function flowTab(projectUrl, type) {
   // A project URL attached to the API job is authoritative. The value pinned
   // in the popup is only a fallback for older callers which omit projectUrl.
   const requested = new URL(projectUrl || flowProjectUrl);
-  if (!requested.pathname.includes("/tools/flow/project/")) {
+  const requestedFlow = parseFlowUrl(requested.href);
+  if (!requestedFlow) {
     throw new Error(`projectUrl phải là URL project Flow, hiện nhận được: ${projectUrl || flowProjectUrl}`);
   }
   const requestedPath = requested.origin + requested.pathname;
-  let targetPath = requestedPath;
-  const projectPath = requested.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
   const ownKey = type === "video" ? "flowVideoTabId" : "flowImageTabId";
   const otherKey = type === "video" ? "flowImageTabId" : "flowVideoTabId";
-  const projectRoot = candidate => {
-    try {
-      const current = new URL(candidate?.url || candidate);
-      const rootPath = current.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
-      return rootPath ? `${current.origin}${rootPath}` : null;
-    } catch {
-      return null;
-    }
-  };
+  const projectRoot = candidate => parseFlowUrl(candidate?.url || candidate)?.projectId || null;
   const effectiveProjectUrl = requested.href;
   const createDedicatedTab = async (url = effectiveProjectUrl) => {
     const created = await chrome.tabs.create({ url, active: true });
@@ -107,11 +99,11 @@ async function flowTab(projectUrl, type) {
   let tab;
   try {
     const saved = await chrome.storage.local.get([ownKey, otherKey]);
-    const isRequestedProject = candidate => projectRoot(candidate) === `${requested.origin}${projectPath}`;
+    const isRequestedProject = candidate => projectRoot(candidate) === requestedFlow.projectId;
     const savedTab = saved[ownKey]
       ? await chrome.tabs.get(saved[ownKey]).catch(() => null)
       : null;
-    const tabs = await chrome.tabs.query({ url: "https://labs.google/fx/*" });
+    const tabs = await chrome.tabs.query({ url: ["https://labs.google/fx/*", "https://flow.google.com/*"] });
     const availableProjectTabs = tabs.filter(candidate =>
       candidate.id !== saved[otherKey] && projectRoot(candidate)
     );
@@ -156,9 +148,7 @@ async function flowTab(projectUrl, type) {
       tab = await createDedicatedTab();
       continue;
     }
-    const currentLocation = current.url ? new URL(current.url) : null;
-    const isRequestedPage = currentLocation &&
-      currentLocation.origin + currentLocation.pathname === targetPath;
+    const isRequestedPage = current.url && isSameFlowProject(requested.href, current.url);
     if (isRequestedPage && current.status === "complete") return current;
     await new Promise(resolve => setTimeout(resolve, 500));
   }
@@ -401,6 +391,7 @@ async function reloadWhenUpdaterInstalledNewVersion() {
       // Refresh AI tabs first so they load the same version from disk.
       const aiTabs = await chrome.tabs.query({ url: [
         "https://labs.google/fx/*",
+        "https://flow.google.com/*",
         "https://gemini.google.com/*",
         "https://chatgpt.com/*"
       ] });
@@ -423,6 +414,7 @@ async function reloadAiTabsAfterRuntimeStart() {
   await chrome.storage.local.set({ contentScriptsRuntimeVersion: version });
   const aiTabs = await chrome.tabs.query({ url: [
     "https://labs.google/fx/*",
+    "https://flow.google.com/*",
     "https://gemini.google.com/*",
     "https://chatgpt.com/*"
   ] });

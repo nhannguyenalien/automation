@@ -1,3 +1,5 @@
+import { flowProjectRoot } from "./flow-url.js";
+
 const ids = ["apiUrl", "apiKey", "workerId", "flowProjectUrl", "enabled"];
 const fields = Object.fromEntries(ids.map(id => [id, document.getElementById(id)]));
 const status = document.getElementById("status");
@@ -17,13 +19,7 @@ chrome.storage.local.get([...ids, "capabilities"], values => {
 });
 
 function projectRoot(url) {
-  try {
-    const current = new URL(url);
-    const rootPath = current.pathname.match(/^(.*\/tools\/flow\/project\/[^/]+)/)?.[1];
-    return rootPath ? `${current.origin}${rootPath}` : "";
-  } catch {
-    return "";
-  }
+  return flowProjectRoot(url);
 }
 
 document.getElementById("useCurrentProject").addEventListener("click", async () => {
