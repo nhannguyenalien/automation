@@ -5,6 +5,10 @@ on:
     branches:
       - main
     paths:
+      - "flow_api.mjs"
+      - "worker-routing.mjs"
+      - "docs/**"
+      - "Dockerfile.backend"
       - "flow-extension/**"
       - "docker/chrome/**"
       - "Dockerfile.chrome"

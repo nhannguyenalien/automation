@@ -10,7 +10,7 @@
 </head>
 <body><div class="layout">
   <aside><div class="brand">Google AI Browser API</div><nav class="nav">
-    <a href="#start">Bắt đầu nhanh</a><a href="#agent">Dành cho AI agent</a><a href="#chat">Chat Gemini/ChatGPT</a><a href="#text-image">Text to image</a><a href="#image-image">Image to image</a><a href="#video">Text/Image to video</a><a href="#video-to-video">Video to video</a><a href="#jobs">Theo dõi job</a><a href="#reference">Tham số</a><a href="#production">Vận hành</a>
+    <a href="#start">Bắt đầu nhanh</a><a href="#extension">Tải extension</a><a href="#agent">Dành cho AI agent</a><a href="#chat">Chat Gemini/ChatGPT</a><a href="#text-image">Text to image</a><a href="#image-image">Image to image</a><a href="#video">Text/Image to video</a><a href="#video-to-video">Video to video</a><a href="#jobs">Theo dõi job</a><a href="#reference">Tham số</a><a href="#production">Vận hành</a>
   </nav></aside>
   <main>
     <section class="hero"><div class="badge"><span class="dot" id="healthDot"></span><span id="healthText">Đang kiểm tra API…</span></div><h1>API cho Gemini Chat và Google Flow</h1><p>Một contract chung cho chat, ảnh và video: xong nhanh trả dữ liệu ngay; chạy lâu trả ID để client lấy kết quả sau.</p><div class="base"><strong>Base URL</strong><code id="baseUrl"></code><button class="copy" data-copy="#baseUrl">Sao chép</button></div></section>
@@ -18,6 +18,9 @@
     <h2 id="start">Bắt đầu nhanh</h2>
     <div class="card"><div class="endpoint"><span class="method get">GET</span><code>/health</code></div><pre><code>curl "$BASE_URL/health"</code></pre></div>
     <div class="note">Máy chạy API phải mở Chrome, đăng nhập Google Pro và bật extension. Job được lưu trên Turso nên không mất khi API restart và có thể dùng chung giữa nhiều máy. Funnel hiện đưa API ra Internet; hãy đặt <code>FLOW_API_KEY</code> và khai báo <code>FLOW_CLIENT_KEY</code> ở client.</div>
+
+    <h2 id="extension">Tải extension</h2>
+    <div class="card"><p>Mở <a href="/extension"><code>/extension</code></a> để tải Google AI Browser Worker. Link <a href="/extension/download"><code>/extension/download</code></a> luôn chuyển tới file ZIP của bản phát hành mới nhất trên GitHub.</p></div>
 
     <h2 id="agent">Dành cho AI agent</h2>
     <div class="card"><p>Cho agent đọc <a href="/llms.txt"><code>/llms.txt</code></a> để nắm luồng gọi API ngắn gọn, hoặc import <a href="/openapi.json"><code>/openapi.json</code></a> để tự hiểu endpoint và schema. Hai trang tài liệu này public như <code>/docs</code>; các endpoint thực thi vẫn bắt buộc API key.</p><pre><code>Agent guide:  $BASE_URL/llms.txt

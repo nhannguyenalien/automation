@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Tải Google AI Browser Worker</title>
+  <style>
+    :root{color-scheme:dark;--bg:#090b10;--panel:#11151d;--line:#252b37;--text:#edf1f7;--muted:#9ba7b8;--blue:#78a9ff;--green:#55d991}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 70% 0,#172445 0,transparent 36%),var(--bg);color:var(--text);font:16px/1.65 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.panel{width:min(680px,100%);padding:clamp(26px,6vw,52px);border:1px solid var(--line);border-radius:24px;background:rgba(17,21,29,.94);box-shadow:0 24px 80px #0006}h1{font-size:clamp(30px,6vw,48px);line-height:1.08;margin:12px 0 16px;letter-spacing:-.035em}p{color:var(--muted)}.tag{display:inline-block;color:var(--green);font-size:13px;font-weight:750;letter-spacing:.04em;text-transform:uppercase}.actions{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0}.button{display:inline-flex;align-items:center;justify-content:center;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:750;background:var(--blue);color:#07101f}.secondary{background:#1a202b;color:var(--text);border:1px solid var(--line)}ol{padding-left:22px;color:var(--muted)}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#d8e5ff}.back{color:var(--blue);text-decoration:none}
+  </style>
+</head>
+<body><main class="panel">
+  <span class="tag">Bản mới nhất từ GitHub</span>
+  <h1>Google AI Browser Worker</h1>
+  <p>Nút bên dưới luôn tải file ZIP của bản extension mới nhất. Khi có bản cập nhật trên GitHub, đường dẫn này tự chuyển sang bản mới — không cần đổi bookmark.</p>
+  <div class="actions">
+    <a class="button" href="/extension/download">Tải extension mới nhất (.zip)</a>
+    <a class="button secondary" href="https://github.com/{{GITHUB_REPOSITORY}}/releases/latest">Xem ghi chú phiên bản</a>
+  </div>
+  <ol><li>Giải nén file ZIP.</li><li>Mở <code>chrome://extensions</code> hoặc <code>edge://extensions</code>.</li><li>Bật Chế độ dành cho nhà phát triển, chọn “Tải tiện ích đã giải nén”, rồi chọn thư mục vừa giải nén.</li></ol>
+  <p><a class="back" href="/docs">← Quay lại tài liệu API</a></p>
+</main></body></html>

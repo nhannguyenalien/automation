@@ -1,0 +1,44 @@
+name: Release browser extension
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "flow-extension/**"
+      - ".github/workflows/release-extension.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read extension version
+        id: version
+        run: echo "version=$(node -p \"require('./flow-extension/manifest.json').version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Package extension
+        run: |
+          mkdir -p dist
+          cd flow-extension
+          zip -qr ../dist/Google-AI-Browser-Worker.zip .
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: extension-v${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/Google-AI-Browser-Worker.zip --clobber
+            gh release edit "$TAG" --latest
+          else
+            gh release create "$TAG" dist/Google-AI-Browser-Worker.zip \
+              --title "Google AI Browser Worker v${{ steps.version.outputs.version }}" \
+              --generate-notes \
+              --latest
+          fi

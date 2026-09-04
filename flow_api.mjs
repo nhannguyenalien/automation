@@ -42,6 +42,8 @@ const inlineWaitByType = {
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
 const apiRelease = "2026-09-04-multi-worker-v1";
+const githubRepository = process.env.FLOW_GITHUB_REPOSITORY || "nhannguyenalien/automation";
+const extensionDownloadUrl = `https://github.com/${githubRepository}/releases/latest/download/Google-AI-Browser-Worker.zip`;
 const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
 const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION_WORKER_PREFIXES || "")
   .split(",")
@@ -620,6 +622,18 @@ const server = http.createServer(async (req, res) => {
     if ((url.pathname === "/docs" || url.pathname === "/docs/") && req.method === "GET") {
       const html = await fs.readFile(path.join(root, "docs", "index.html"), "utf8");
       return sendHtml(res, 200, html);
+    }
+    if ((url.pathname === "/extension" || url.pathname === "/extension/") && req.method === "GET") {
+      const html = await fs.readFile(path.join(root, "docs", "extension.html"), "utf8");
+      return sendHtml(res, 200, html.replaceAll("{{GITHUB_REPOSITORY}}", githubRepository));
+    }
+    if (url.pathname === "/extension/download" && req.method === "GET") {
+      res.writeHead(302, {
+        location: extensionDownloadUrl,
+        "cache-control": "no-store",
+        "content-type": "text/plain; charset=utf-8"
+      });
+      return res.end(`Redirecting to ${extensionDownloadUrl}\n`);
     }
     if (url.pathname === "/llms.txt" && req.method === "GET") {
       const guide = await fs.readFile(path.join(root, "docs", "llms.txt"), "utf8");

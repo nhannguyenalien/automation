@@ -6,13 +6,20 @@
     "description": "Queue-based API for Gemini/ChatGPT web chat, Google Flow image/video generation, and ChatGPT web image generation through an authenticated browser extension. POST requests may return 200 completed or 202 queued/running; poll the returned job URL until terminal status."
   },
   "servers": [
-    { "url": "https://nhans-macbook-pro-1.tail5d608a.ts.net" }
+    { "url": "https://image-ai.toidayhoc.com" }
   ],
   "security": [
     { "bearerAuth": [] },
     { "apiKeyAuth": [] }
   ],
   "paths": {
+    "/extension/download": {
+      "get": {
+        "summary": "Download the latest browser extension ZIP from GitHub Releases",
+        "security": [],
+        "responses": { "302": { "description": "Redirect to the latest GitHub release asset" } }
+      }
+    },
     "/health": {
       "get": {
         "summary": "Check API, queue, database and storage health",
