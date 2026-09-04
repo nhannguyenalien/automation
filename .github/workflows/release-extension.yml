@@ -20,7 +20,9 @@ jobs:
 
       - name: Read extension version
         id: version
-        run: echo "version=$(node -p \"require('./flow-extension/manifest.json').version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          version=$(node -p "require('./flow-extension/manifest.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Package extension
         run: |
