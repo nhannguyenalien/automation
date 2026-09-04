@@ -382,7 +382,15 @@ chrome.runtime.onStartup.addListener(() => chrome.alarms.create("extension-updat
 
 async function reloadWhenUpdaterInstalledNewVersion() {
   try {
-    const response = await fetch("http://127.0.0.1:8765/status", { cache: "no-store" });
+    const cfg = await config();
+    const latestResponse = await fetch(`${cfg.apiUrl.replace(/\/$/, "")}/extension/latest`, {
+      headers: cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {},
+      cache: "no-store"
+    });
+    if (!latestResponse.ok) return;
+    const latest = await latestResponse.json();
+    if (!latest.version || latest.version === chrome.runtime.getManifest().version) return;
+    const response = await fetch("http://127.0.0.1:8765/update", { method: "POST" });
     if (!response.ok) return;
     const result = await response.json();
     if (result.ok && result.version && result.version !== chrome.runtime.getManifest().version) {

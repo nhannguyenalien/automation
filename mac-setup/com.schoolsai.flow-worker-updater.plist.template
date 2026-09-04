@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.schoolsai.flow-worker-updater</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__NODE_BIN__</string>
+    <string>__SERVICE_SCRIPT__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>FLOW_WORKER_REPO_DIR</key>
+    <string>__REPO_DIR__</string>
+    <key>FLOW_WORKER_EXTENSION_DIRS</key>
+    <string>__EXTENSION_DIRS__</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/service.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/service-error.log</string>
+</dict>
+</plist>

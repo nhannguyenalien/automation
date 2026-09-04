@@ -50,19 +50,38 @@ document.getElementById("save").addEventListener("click", async () => {
 document.getElementById("update").addEventListener("click", async event => {
   const button = event.currentTarget;
   button.disabled = true;
-  status.textContent = "Đang yêu cầu Windows tải bản mới từ GitHub…";
+  status.textContent = "Đang kiểm tra bản mới trên backend image-ai…";
   try {
-    const response = await fetch("http://127.0.0.1:8765/update", { method: "POST" });
-    const result = await response.json();
-    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    if (result.version === chrome.runtime.getManifest().version) {
-      status.textContent = `Đã là bản mới nhất v${result.version}.`;
+    const apiUrl = fields.apiUrl.value.trim().replace(/\/$/, "");
+    if (!apiUrl) throw new Error("Chưa cấu hình API URL");
+    const latestResponse = await fetch(`${apiUrl}/extension/latest`, {
+      headers: fields.apiKey.value ? { authorization: `Bearer ${fields.apiKey.value}` } : {},
+      cache: "no-store",
+      signal: AbortSignal.timeout(15000)
+    });
+    const latest = await latestResponse.json();
+    if (!latestResponse.ok || !latest.version) {
+      throw new Error(latest.error || `Backend HTTP ${latestResponse.status}`);
+    }
+    if (latest.version === chrome.runtime.getManifest().version) {
+      status.textContent = `Đã là bản mới nhất v${latest.version}.`;
       return;
     }
+    status.textContent = `Backend có v${latest.version}. Đang cài đặt trên máy…`;
+    const response = await fetch("http://127.0.0.1:8765/update", {
+      method: "POST",
+      signal: AbortSignal.timeout(120000)
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     status.textContent = `Đã tải v${result.version}. Extension đang khởi động lại…`;
     setTimeout(() => chrome.runtime.reload(), 700);
   } catch (error) {
-    status.textContent = `Không gọi được updater Windows: ${error.message}\nHãy chạy lại vm-setup\\install-updater.ps1 bằng PowerShell Administrator.`;
+    const platform = (await chrome.runtime.getPlatformInfo()).os;
+    const setup = platform === "mac"
+      ? "Hãy chạy lại mac-setup/install-updater.sh trong Terminal."
+      : "Hãy chạy lại vm-setup\\install-updater.ps1 bằng PowerShell Administrator.";
+    status.textContent = `Cập nhật thất bại: ${error.message}\n${setup}`;
   } finally {
     button.disabled = false;
   }

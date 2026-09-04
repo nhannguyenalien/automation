@@ -13,6 +13,13 @@
     { "apiKeyAuth": [] }
   ],
   "paths": {
+    "/extension/latest": {
+      "get": {
+        "summary": "Check the latest extension version published by this backend",
+        "security": [],
+        "responses": { "200": { "description": "Latest version and backend download URL", "content": { "application/json": { "schema": { "type": "object", "required": ["version", "downloadUrl"], "properties": { "version": { "type": "string" }, "downloadUrl": { "type": "string", "format": "uri" }, "pageUrl": { "type": "string", "format": "uri" } } } } } } }
+      }
+    },
     "/extension/download": {
       "get": {
         "summary": "Download the latest browser extension ZIP from GitHub Releases",

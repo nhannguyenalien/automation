@@ -7,6 +7,7 @@ OpenAPI: https://image-ai.toidayhoc.com/openapi.json
 Human docs: https://image-ai.toidayhoc.com/docs
 Extension download page: https://image-ai.toidayhoc.com/extension
 Latest extension ZIP: https://image-ai.toidayhoc.com/extension/download
+Latest extension metadata: https://image-ai.toidayhoc.com/extension/latest
 
 ## Authentication
 
@@ -14,7 +15,7 @@ Execution endpoints require either:
 - Authorization: Bearer YOUR_API_KEY
 - X-API-Key: YOUR_API_KEY
 
-Never put the API key in a URL or log it. GET /health, /docs, /extension, /extension/download, /llms.txt and /openapi.json are public.
+Never put the API key in a URL or log it. GET /health, /docs, /extension, /extension/latest, /extension/download, /llms.txt and /openapi.json are public.
 
 ## Required job pattern
 

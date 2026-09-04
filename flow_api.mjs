@@ -44,6 +44,7 @@ const defaultWorker = process.env.FLOW_WORKER || "playwright";
 const apiRelease = "2026-09-04-multi-worker-v1";
 const githubRepository = process.env.FLOW_GITHUB_REPOSITORY || "nhannguyenalien/automation";
 const extensionDownloadUrl = `https://github.com/${githubRepository}/releases/latest/download/Google-AI-Browser-Worker.zip`;
+const extensionManifestPath = path.join(root, "flow-extension", "manifest.json");
 const configuredFlowProjectUrl = String(process.env.FLOW_PROJECT_URL || "").trim();
 const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION_WORKER_PREFIXES || "")
   .split(",")
@@ -626,6 +627,16 @@ const server = http.createServer(async (req, res) => {
     if ((url.pathname === "/extension" || url.pathname === "/extension/") && req.method === "GET") {
       const html = await fs.readFile(path.join(root, "docs", "extension.html"), "utf8");
       return sendHtml(res, 200, html.replaceAll("{{GITHUB_REPOSITORY}}", githubRepository));
+    }
+    if (url.pathname === "/extension/latest" && req.method === "GET") {
+      const manifest = JSON.parse(await fs.readFile(extensionManifestPath, "utf8"));
+      const origin = publicOrigin(req);
+      return send(res, 200, {
+        name: manifest.name,
+        version: manifest.version,
+        downloadUrl: `${origin}/extension/download`,
+        pageUrl: `${origin}/extension`
+      }, { "cache-control": "no-store" });
     }
     if (url.pathname === "/extension/download" && (req.method === "GET" || req.method === "HEAD")) {
       res.writeHead(302, {
