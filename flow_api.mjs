@@ -627,13 +627,13 @@ const server = http.createServer(async (req, res) => {
       const html = await fs.readFile(path.join(root, "docs", "extension.html"), "utf8");
       return sendHtml(res, 200, html.replaceAll("{{GITHUB_REPOSITORY}}", githubRepository));
     }
-    if (url.pathname === "/extension/download" && req.method === "GET") {
+    if (url.pathname === "/extension/download" && (req.method === "GET" || req.method === "HEAD")) {
       res.writeHead(302, {
         location: extensionDownloadUrl,
         "cache-control": "no-store",
         "content-type": "text/plain; charset=utf-8"
       });
-      return res.end(`Redirecting to ${extensionDownloadUrl}\n`);
+      return res.end(req.method === "HEAD" ? undefined : `Redirecting to ${extensionDownloadUrl}\n`);
     }
     if (url.pathname === "/llms.txt" && req.method === "GET") {
       const guide = await fs.readFile(path.join(root, "docs", "llms.txt"), "utf8");
