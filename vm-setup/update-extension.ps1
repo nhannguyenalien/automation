@@ -28,6 +28,34 @@ function Test-FlowApiHealthy {
     }
 }
 
+function Restart-BrowserWorkers {
+    $browserProcesses = Get-Process -Name chrome, msedge -ErrorAction SilentlyContinue
+    if (-not $browserProcesses) { return }
+
+    $browserPaths = $browserProcesses |
+        ForEach-Object { try { $_.Path } catch { $null } } |
+        Where-Object { $_ } |
+        Sort-Object -Unique
+
+    $browserProcesses | Stop-Process -Force
+    Start-Sleep -Seconds 3
+    foreach ($browserPath in $browserPaths) {
+        Start-Process -FilePath $browserPath -ArgumentList '--restore-last-session'
+    }
+    Write-Output 'Reloaded browser workers after extension update.'
+}
+
+function Test-PreviousUpdateNeedsBrowserReload {
+    if (-not (Test-Path $statusFile)) { return $false }
+    try {
+        $previousStatus = Get-Content $statusFile -Raw | ConvertFrom-Json
+        return [bool]$previousStatus.ok -and [bool]$previousStatus.updated
+    }
+    catch {
+        return $false
+    }
+}
+
 function Write-UpdateStatus($ok, $version, $sha, $updated, $errorMessage = '') {
     @{
         ok = [bool]$ok
@@ -59,6 +87,12 @@ try {
         if (-not (Test-FlowApiHealthy)) {
             Restart-FlowApi
             Write-Output 'API was unhealthy and has been restarted.'
+        }
+        # The previous updater process may have replaced the extension files
+        # while executing an older copy of this script. Reload browsers once
+        # on the next scheduled pass so the unpacked extension is activated.
+        if (Test-PreviousUpdateNeedsBrowserReload) {
+            Restart-BrowserWorkers
         }
         Write-UpdateStatus $true $version $remoteSha $false
         Write-Output "Already current: $remoteSha"
@@ -94,6 +128,7 @@ try {
         $version = (Get-Content (Join-Path $extensionDir 'manifest.json') -Raw | ConvertFrom-Json).version
         Restart-FlowApi
         Write-UpdateStatus $true $version $remoteSha $true
+        Restart-BrowserWorkers
         Write-Output "Updated to $remoteSha (extension v$version)"
     }
     finally {
