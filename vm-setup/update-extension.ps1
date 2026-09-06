@@ -29,12 +29,11 @@ function Test-FlowApiHealthy {
 }
 
 function Restart-BrowserWorkers {
-    $workerProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.Name -eq 'chrome.exe' -and
-            $_.CommandLine -match '--user-data-dir[=\"]+C:\\ChromeProfile'
-        }
-    $workerProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    # This VM is a dedicated browser worker. Chrome's child processes do not
+    # repeat --user-data-dir in their command lines, so stopping only the
+    # matching root can leave the existing browser process group alive. A new
+    # launch then reuses that group and silently ignores --load-extension.
+    Get-Process -Name chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 3
     Start-BrowserWorker
     Write-Output 'Reloaded browser workers after extension update.'
