@@ -3,6 +3,30 @@ const visible = element => element && element.getClientRects().length > 0;
 const text = element => (element?.innerText || element?.textContent || "").trim();
 const labelText = element => `${element?.getAttribute?.("aria-label") || ""} ${element?.getAttribute?.("title") || ""} ${text(element)}`.trim();
 
+// Flow's September 2026 settings use accessible radio controls whose visible
+// caption can live in aria-labelledby, an associated <label>, or a sibling in
+// the radio wrapper. innerText alone is therefore empty on some Chrome/Windows
+// builds even though the control is announced correctly by accessibility APIs.
+function controlLabel(element) {
+  if (!element) return "";
+  const labelledBy = String(element.getAttribute?.("aria-labelledby") || "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(id => labelText(document.getElementById(id)))
+    .join(" ");
+  const ownId = element.getAttribute?.("id");
+  const associatedLabel = ownId
+    ? [...document.querySelectorAll("label")].find(label => label.htmlFor === ownId)
+    : null;
+  return [
+    labelText(element),
+    labelledBy,
+    labelText(associatedLabel),
+    labelText(element.closest?.("label")),
+    labelText(element.parentElement)
+  ].map(value => value.replace(/\s+/g, " ").trim()).find(Boolean) || "";
+}
+
 async function waitFor(find, timeout = 180000, label = "phần tử") {
   const started = Date.now();
   while (Date.now() - started < timeout) {
@@ -602,7 +626,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       return 3;
     };
     const bestMatchingControl = root => deepElements(selector, root)
-      .filter(el => visible(el) && pattern.test(labelText(el).trim()))
+      .filter(el => visible(el) && pattern.test(controlLabel(el)))
       .sort((a, b) => rankControl(a) - rankControl(b) ||
         (a.getBoundingClientRect().width * a.getBoundingClientRect().height) -
         (b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0] || null;
@@ -621,7 +645,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       // The individual controls are still accessible, so use the visible
       // lower-screen control as a safe fallback (sidebar items sit higher).
       return deepElements(selector).filter(el => {
-        if (!visible(el) || !pattern.test(labelText(el).trim())) return false;
+        if (!visible(el) || !pattern.test(controlLabel(el))) return false;
         const rect = el.getBoundingClientRect();
         return rect.top > window.innerHeight * 0.35;
       }).sort((a, b) => rankControl(a) - rankControl(b) ||
@@ -656,9 +680,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
         const selected = el.getAttribute("aria-checked") === "true" ||
           el.checked === true || el.getAttribute("value") === "1";
         const nearby = [
-          labelText(el),
-          labelText(el.closest?.("label")),
-          labelText(el.parentElement)
+          controlLabel(el)
         ].filter(Boolean);
         return selected && nearby.some(value => wantedType.test(value.trim()));
       });
@@ -675,9 +697,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
     for (let attempt = 0; attempt < 2 && !selectedMediaType(); attempt += 1) {
       const radio = deepElements('[role="radio"],input[type="radio"]')
         .find(el => visible(el) && [
-          labelText(el),
-          labelText(el.closest?.("label")),
-          labelText(el.parentElement)
+          controlLabel(el)
         ].filter(Boolean).some(value => wantedType.test(value.trim())));
       if (!radio) break;
       await clickLikeUser(radio);
