@@ -109,15 +109,11 @@ try {
             Restart-FlowApi
             Write-Output 'API was unhealthy and has been restarted.'
         }
-        # The previous updater process may have replaced the extension files
-        # while executing an older copy of this script. Reload browsers once
-        # on the next scheduled pass so the unpacked extension is activated.
-        if (Test-PreviousUpdateNeedsBrowserReload) {
-            Restart-BrowserWorkers
-        }
-        else {
-            Ensure-BrowserWorker
-        }
+        # Never stop a healthy browser here. The extension calls this updater
+        # over localhost and reloads its own runtime after the response. If we
+        # kill Chrome first, that response is lost and the worker can remain
+        # offline. The scheduled watchdog only needs to start a missing worker.
+        Ensure-BrowserWorker
         Write-UpdateStatus $true $version $remoteSha $false
         Write-Output "Already current: $remoteSha"
         return
@@ -152,7 +148,6 @@ try {
         $version = (Get-Content (Join-Path $extensionDir 'manifest.json') -Raw | ConvertFrom-Json).version
         Restart-FlowApi
         Write-UpdateStatus $true $version $remoteSha $true
-        Restart-BrowserWorkers
         Write-Output "Updated to $remoteSha (extension v$version)"
     }
     finally {
