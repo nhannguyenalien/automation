@@ -451,9 +451,12 @@ async function heartbeat() {
 // A manual reload of an unpacked extension does not consistently emit
 // onInstalled/onStartup. Initialise polling whenever this service worker is
 // evaluated so queued jobs resume without requiring a popup button click.
-void chrome.alarms.create("poll", { periodInMinutes: 0.1 });
-// Chrome production builds clamp recurring alarms to 30 seconds. The API
-// online window is deliberately longer so one delayed alarm does not flap.
+// Chrome 120+ rejects recurring alarms shorter than 30 seconds. Registering
+// 0.1 minutes silently left production workers with only their startup poll,
+// so jobs created later stayed queued even though heartbeat remained online.
+void chrome.alarms.create("poll", { periodInMinutes: 0.5 });
+// The API online window is deliberately longer so one delayed alarm does not
+// flap. Heartbeat also polls as a fallback if Chrome drops the poll alarm.
 void chrome.alarms.create("heartbeat", { periodInMinutes: 0.5 });
 void chrome.alarms.create("extension-update", { periodInMinutes: 5 });
 pollAll();
@@ -462,7 +465,10 @@ void reloadAiTabsAfterRuntimeStart();
 void reloadWhenUpdaterInstalledNewVersion();
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === "poll") pollAll();
-  if (alarm.name === "heartbeat") void heartbeat().catch(() => {});
+  if (alarm.name === "heartbeat") {
+    pollAll();
+    void heartbeat().catch(() => {});
+  }
   if (alarm.name === "extension-update") void reloadWhenUpdaterInstalledNewVersion();
 });
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
