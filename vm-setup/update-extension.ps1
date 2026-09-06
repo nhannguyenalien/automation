@@ -60,9 +60,17 @@ function Ensure-BrowserWorker {
             $_.CommandLine -match '--user-data-dir[=\"]+C:\\ChromeProfile'
         } |
         Select-Object -First 1
-    if (-not $worker) {
-        Start-BrowserWorker
-        Write-Output 'Browser worker was missing and has been started.'
+    $heartbeatOnline = $false
+    try {
+        $workers = Invoke-RestMethod -TimeoutSec 5 -Uri 'http://127.0.0.1:8787/extension/workers'
+        $heartbeatOnline = @($workers.workers | Where-Object {
+            $_.machineId -eq 'proxmox-windows' -and $_.online
+        }).Count -gt 0
+    }
+    catch {}
+    if (-not $worker -or -not $heartbeatOnline) {
+        Restart-BrowserWorkers
+        Write-Output 'Browser worker had no live heartbeat and has been restarted.'
     }
 }
 
