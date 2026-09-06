@@ -29,20 +29,41 @@ function Test-FlowApiHealthy {
 }
 
 function Restart-BrowserWorkers {
-    $browserProcesses = Get-Process -Name chrome, msedge -ErrorAction SilentlyContinue
-    if (-not $browserProcesses) { return }
-
-    $browserPaths = $browserProcesses |
-        ForEach-Object { try { $_.Path } catch { $null } } |
-        Where-Object { $_ } |
-        Sort-Object -Unique
-
-    $browserProcesses | Stop-Process -Force
+    $workerProcesses = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -eq 'chrome.exe' -and
+            $_.CommandLine -match '--user-data-dir[=\"]+C:\\ChromeProfile'
+        }
+    $workerProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Seconds 3
-    foreach ($browserPath in $browserPaths) {
-        Start-Process -FilePath $browserPath -ArgumentList '--restore-last-session'
-    }
+    Start-BrowserWorker
     Write-Output 'Reloaded browser workers after extension update.'
+}
+
+function Start-BrowserWorker {
+    $chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
+    if (-not (Test-Path $chrome)) { return }
+    $chromeArgs = @(
+        '--user-data-dir=C:\ChromeProfile'
+        '--load-extension=C:\Automation\flow-extension'
+        '--no-first-run'
+        '--no-default-browser-check'
+        'https://gemini.google.com/app'
+    )
+    Start-Process -FilePath $chrome -ArgumentList $chromeArgs
+}
+
+function Ensure-BrowserWorker {
+    $worker = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -eq 'chrome.exe' -and
+            $_.CommandLine -match '--user-data-dir[=\"]+C:\\ChromeProfile'
+        } |
+        Select-Object -First 1
+    if (-not $worker) {
+        Start-BrowserWorker
+        Write-Output 'Browser worker was missing and has been started.'
+    }
 }
 
 function Test-PreviousUpdateNeedsBrowserReload {
@@ -93,6 +114,9 @@ try {
         # on the next scheduled pass so the unpacked extension is activated.
         if (Test-PreviousUpdateNeedsBrowserReload) {
             Restart-BrowserWorkers
+        }
+        else {
+            Ensure-BrowserWorker
         }
         Write-UpdateStatus $true $version $remoteSha $false
         Write-Output "Already current: $remoteSha"
