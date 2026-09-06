@@ -34,7 +34,13 @@ async function api(path, body) {
   const response = await fetch(`${cfg.apiUrl.replace(/\/$/, "")}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    // A browser fetch can remain pending across an API restart. Without a
+    // deadline the lane stays busy forever and every later alarm is ignored;
+    // opening the popup and pressing Save only appeared to fix it because it
+    // caused a fresh poll in a new runtime. Always release the lane so the
+    // next alarm can retry automatically.
+    signal: AbortSignal.timeout(30_000)
   });
   const json = await response.json();
   if (!response.ok) throw new Error(json.error || `API HTTP ${response.status}`);
