@@ -214,9 +214,12 @@ function viewerMatchesPrompt(prompt) {
 }
 
 function generatedLinks() {
-  return [...document.querySelectorAll('a[href]')].filter(el => {
+  // Flow now mounts library cards inside nested web-component shadow roots.
+  // A document-only query can therefore miss a result that is visibly present
+  // and leave the API job running until its timeout expires.
+  return deepElements('a[href]').filter(el => {
     if (!visible(el)) return false;
-    const image = el.querySelector("img");
+    const image = deepElements("img", el)[0];
     if (!image || !visible(image) || !(image.currentSrc || image.src)) return false;
     const labels = [labelText(el), labelText(image)];
     let context = el.parentElement;
@@ -231,7 +234,7 @@ function generatedLinks() {
     const label = labels.join(" ");
     // A video thumbnail is still an <img>. Never let it enter the image lane,
     // even when its card is temporarily mounted inside the Images library.
-    if (el.querySelector("video") || /Veo|video|play_circle|Hình thu nhỏ video|Phát|Play/i.test(label)) return false;
+    if (deepElements("video", el).length || /Veo|video|play_circle|Hình thu nhỏ video|Phát|Play/i.test(label)) return false;
     const rect = image?.getBoundingClientRect();
     return /Hình ảnh được tạo|Generated image|Open image/i.test(label) || (rect.width >= 200 && rect.height >= 150);
   });
@@ -242,7 +245,7 @@ function imageLinkSnapshot() {
   const sources = new Set();
   for (const link of generatedLinks()) {
     hrefs.add(link.href);
-    const image = link.querySelector("img");
+    const image = deepElements("img", link)[0];
     if (image?.currentSrc || image?.src) sources.add(image.currentSrc || image.src);
   }
   return { hrefs, sources };
@@ -805,10 +808,10 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
 }
 
 function generatedVideoLinks() {
-  return [...document.querySelectorAll('a[href]')].filter(link => {
+  return deepElements('a[href]').filter(link => {
     if (!visible(link)) return false;
     const label = `${link.getAttribute("aria-label") || ""} ${text(link)} ${text(link.parentElement)}`;
-    return Boolean(link.querySelector('video')) ||
+    return deepElements('video', link).length > 0 ||
       /Hình thu nhỏ video|Video thumbnail|Generated video|Video được tạo|play_circle|Phát|Play/i.test(label);
   });
 }
@@ -965,7 +968,7 @@ async function generate(task) {
   // card is accepted only when both its href and image source are new.
   const before = recoverExistingImage ? { hrefs: new Set(), sources: new Set() } :
     task.type === "image" ? await stableImageBaseline() : {
-    hrefs: new Set([...document.querySelectorAll('a[href]')].map(el => el.href)),
+    hrefs: new Set(deepElements('a[href]').map(el => el.href)),
     sources: new Set()
   };
   // A previous attempt may have successfully created the image and then lost
@@ -983,7 +986,8 @@ async function generate(task) {
     const now = Date.now();
     const candidates = task.type === "video" ? generatedVideoLinks() : generatedLinks();
     for (const link of candidates) {
-      const source = link.querySelector("img")?.currentSrc || link.querySelector("img")?.src || "";
+      const image = deepElements("img", link)[0];
+      const source = image?.currentSrc || image?.src || "";
       if (!visible(link) || before.hrefs.has(link.href) || (task.type === "image" && before.sources.has(source)) || discovered.has(link.href)) continue;
       discovered.set(link.href, { link, source, discoveredAt: now });
       lastDiscoveryAt = now;
@@ -1000,7 +1004,7 @@ async function generate(task) {
     : "ảnh kết quả mới");
   const resultUrls = result;
   if (task.type === "video") {
-    const firstResult = [...document.querySelectorAll('a[href]')].find(link => link.href === resultUrls[0]);
+    const firstResult = deepElements('a[href]').find(link => link.href === resultUrls[0]);
     if (!firstResult) throw new Error("Thẻ kết quả mới đã biến mất khỏi thư viện Flow");
     await clickLikeUser(clickableResult(firstResult));
     await sleep(1000);

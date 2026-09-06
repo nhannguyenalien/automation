@@ -220,9 +220,15 @@ async function chat(task) {
   return { ok: true, text: response, conversationUrl: location.href };
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "PING") return void sendResponse({ ok: true, app: "gemini" });
-  if (message.type !== "CHAT") return;
-  chat(message.task).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
-  return true;
-});
+// Chrome invalidates the runtime object of an already-injected content script
+// when this unpacked extension updates itself. The page is reloaded right
+// afterwards, but the stale script can still reach this line during teardown.
+// Do not turn that normal update window into a persistent extension error.
+if (globalThis.chrome?.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "PING") return void sendResponse({ ok: true, app: "gemini" });
+    if (message.type !== "CHAT") return;
+    chat(message.task).then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
+    return true;
+  });
+}
