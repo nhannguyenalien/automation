@@ -594,6 +594,18 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
   // mode menu whenever the next control is no longer visible.
   async function ensureMenuControl(pattern, label) {
     const selector = '[role="tab"],[role="radio"],[role="option"],[role="menuitem"],[role="button"],button,label';
+    const rankControl = el => {
+      const role = el.getAttribute("role");
+      if (role === "radio") return 0;
+      if (role === "tab" || role === "option" || role === "menuitem") return 1;
+      if (role === "button" || el.tagName === "BUTTON") return 2;
+      return 3;
+    };
+    const bestMatchingControl = root => deepElements(selector, root)
+      .filter(el => visible(el) && pattern.test(labelText(el).trim()))
+      .sort((a, b) => rankControl(a) - rankControl(b) ||
+        (a.getBoundingClientRect().width * a.getBoundingClientRect().height) -
+        (b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0] || null;
     const findControl = () => {
       // Flow replaces the complete settings popover when Image/Video or a
       // generation mode is selected. Never retain a menu DOM node across a
@@ -601,19 +613,20 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       // same on screen.
       const currentMenu = findModeMenu();
       if (currentMenu) {
-        const scoped = deepElements(selector, currentMenu)
-          .find(el => visible(el) && pattern.test(labelText(el)));
+        const scoped = bestMatchingControl(currentMenu);
         if (scoped) return scoped;
       }
 
       // Some current Flow builds do not expose a role on the popover root.
       // The individual controls are still accessible, so use the visible
       // lower-screen control as a safe fallback (sidebar items sit higher).
-      return deepElements(selector).find(el => {
-        if (!visible(el) || !pattern.test(labelText(el))) return false;
+      return deepElements(selector).filter(el => {
+        if (!visible(el) || !pattern.test(labelText(el).trim())) return false;
         const rect = el.getBoundingClientRect();
         return rect.top > window.innerHeight * 0.35;
-      }) || null;
+      }).sort((a, b) => rankControl(a) - rankControl(b) ||
+        (a.getBoundingClientRect().width * a.getBoundingClientRect().height) -
+        (b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0] || null;
     };
 
     let control = findControl();
@@ -634,6 +647,21 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
   // directly (ratio/output) and no longer includes an Image item there.
   // Trying to re-select Image in that state caused a false 10-second timeout.
   if (!expectedMode.test(labelText(mode))) {
+    const wantedType = type === "video"
+      ? /^(?:Video|Videos)$/i
+      : /^(?:Hình ảnh|Images?)$/i;
+    const selectedMediaType = () => deepElements('[role="radio"],input[type="radio"]')
+      .find(el => {
+        if (!visible(el)) return false;
+        const selected = el.getAttribute("aria-checked") === "true" ||
+          el.checked === true || el.getAttribute("value") === "1";
+        const nearby = [
+          labelText(el),
+          labelText(el.closest?.("label")),
+          labelText(el.parentElement)
+        ].filter(Boolean);
+        return selected && nearby.some(value => wantedType.test(value.trim()));
+      });
     const mediaType = await ensureMenuControl(
       type === "video"
         ? /(?:^|\s)(?:Video|Videos)\s*$/i
@@ -642,29 +670,25 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
     );
     await clickLikeUser(mediaType);
     await sleep(500);
+    // Flow sometimes gives the wrapper and the actual radio the same label.
+    // Re-resolve and click the radio itself if the first click did not stick.
+    for (let attempt = 0; attempt < 2 && !selectedMediaType(); attempt += 1) {
+      const radio = deepElements('[role="radio"],input[type="radio"]')
+        .find(el => visible(el) && [
+          labelText(el),
+          labelText(el.closest?.("label")),
+          labelText(el.parentElement)
+        ].filter(Boolean).some(value => wantedType.test(value.trim())));
+      if (!radio) break;
+      await clickLikeUser(radio);
+      await sleep(500);
+    }
     mode = await waitFor(() => {
       const current = findModeButton();
       // September 2026 Flow keeps the settings popover open and replaces its
       // controls in-place. The selected radio is more authoritative than the
       // outer button text, which can briefly retain the previous mode.
-      const selectedType = deepElements('[role="radio"],input[type="radio"]')
-        .find(el => {
-          if (!visible(el)) return false;
-          const selected = el.getAttribute("aria-checked") === "true" ||
-            el.checked === true || el.getAttribute("value") === "1";
-          const wanted = type === "video"
-            ? /^(?:Video|Videos)$/i
-            : /^(?:Hình ảnh|Images?)$/i;
-          // Flow's custom radio keeps the visible label in a sibling/parent,
-          // while the radio node itself can expose only value=1. Read the
-          // smallest nearby labelled wrapper as well as the radio node.
-          const nearby = [
-            labelText(el),
-            labelText(el.closest?.("label")),
-            labelText(el.parentElement)
-          ].filter(Boolean);
-          return selected && nearby.some(value => wanted.test(value.trim()));
-        });
+      const selectedType = selectedMediaType();
       if (selectedType) return current || selectedType;
       if (!current) return null;
       const label = labelText(current);
