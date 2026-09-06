@@ -50,6 +50,10 @@ const allowedExtensionWorkerPrefixes = String(process.env.FLOW_ALLOWED_EXTENSION
   .split(",")
   .map((value) => value.trim())
   .filter(Boolean);
+const blockedExtensionWorkerPrefixes = String(process.env.FLOW_BLOCKED_EXTENSION_WORKER_PREFIXES || "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
 // Scope extension jobs in the indexed `worker` column, not only at the claim
 // endpoint. Multiple API deployments may share one Turso database; an older
 // deployment otherwise cannot see our allowlist and can lease these jobs to
@@ -63,6 +67,9 @@ function isExtensionJob(job) {
 }
 
 function isAllowedExtensionWorker(workerId) {
+  if (blockedExtensionWorkerPrefixes.some((prefix) => workerId === prefix || workerId.startsWith(`${prefix}-`))) {
+    return false;
+  }
   if (!allowedExtensionWorkerPrefixes.length) return true;
   return allowedExtensionWorkerPrefixes.some((prefix) => workerId === prefix || workerId.startsWith(`${prefix}-`));
 }

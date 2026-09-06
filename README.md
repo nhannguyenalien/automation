@@ -363,6 +363,7 @@ Nếu S3 chưa cấu hình, extension worker mới sẽ báo lỗi thay vì hoà
 | `FLOW_IMAGE_MAX_RETRIES` | `0` | Retry job ảnh; mặc định tắt để tránh ảnh trùng |
 | `FLOW_MAX_RETRIES` | `2` | Retry mặc định cho chat/video |
 | `FLOW_WORKER_ONLINE_SECONDS` | `75` | Thời gian không heartbeat trước khi một lane bị coi là offline |
+| `FLOW_BLOCKED_EXTENSION_WORKER_PREFIXES` | trống | Danh sách prefix worker không được heartbeat/claim job, phân cách bằng dấu phẩy |
 | `FLOW_SAME_WORKER_RETRY_DELAY_MS` | `60000` | Thời gian tránh giao lại prompt lỗi cho cùng worker |
 | `FLOW_PROVIDER_FAILOVER_RETRIES` | `2` | Số lần chuyển worker thêm cho lỗi quota provider |
 | `FLOW_PROVIDER_WORKER_COOLDOWN_MS` | `900000` | Thời gian tránh tài khoản/worker vừa báo hết quota |
