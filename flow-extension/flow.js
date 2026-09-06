@@ -655,7 +655,15 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
           const wanted = type === "video"
             ? /^(?:Video|Videos)$/i
             : /^(?:Hình ảnh|Images?)$/i;
-          return selected && wanted.test(labelText(el).trim());
+          // Flow's custom radio keeps the visible label in a sibling/parent,
+          // while the radio node itself can expose only value=1. Read the
+          // smallest nearby labelled wrapper as well as the radio node.
+          const nearby = [
+            labelText(el),
+            labelText(el.closest?.("label")),
+            labelText(el.parentElement)
+          ].filter(Boolean);
+          return selected && nearby.some(value => wanted.test(value.trim()));
         });
       if (selectedType) return current || selectedType;
       if (!current) return null;
