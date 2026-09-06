@@ -149,7 +149,17 @@ async function flowTab(projectUrl, type) {
       continue;
     }
     const isRequestedPage = current.url && isSameFlowProject(requested.href, current.url);
-    if (isRequestedPage && current.status === "complete") return current;
+    if (isRequestedPage) {
+      if (current.status === "complete") return current;
+      // Flow keeps background requests alive and Chrome can therefore leave
+      // the tab status at "loading" even though the SPA and our content
+      // script are already usable. A successful PING is the stronger ready
+      // signal and avoids a false 90-second project timeout.
+      try {
+        const pong = await chrome.tabs.sendMessage(current.id, { type: "PING" });
+        if (pong?.ok) return current;
+      } catch {}
+    }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
   const current = await chrome.tabs.get(tab.id).catch(() => null);
