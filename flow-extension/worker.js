@@ -409,8 +409,8 @@ async function poll(lane) {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => chrome.alarms.create("poll", { periodInMinutes: 0.1 }));
-chrome.runtime.onStartup.addListener(() => chrome.alarms.create("poll", { periodInMinutes: 0.1 }));
+chrome.runtime.onInstalled.addListener(() => chrome.alarms.create("poll", { periodInMinutes: 0.5 }));
+chrome.runtime.onStartup.addListener(() => chrome.alarms.create("poll", { periodInMinutes: 0.5 }));
 chrome.runtime.onInstalled.addListener(() => chrome.alarms.create("extension-update", { periodInMinutes: 5 }));
 chrome.runtime.onStartup.addListener(() => chrome.alarms.create("extension-update", { periodInMinutes: 5 }));
 
@@ -561,7 +561,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (item?.state === "interrupted") throw new Error(item.error || "Chrome download bị gián đoạn");
         await new Promise(resolve => setTimeout(resolve, 500));
       }
-      throw new Error("Chrome download URL quá 60 giây");
+      // The API upload above is the durable job output. Chrome/Edge can leave
+      // authenticated blob/CDN downloads in an in-progress state indefinitely
+      // even though the same bytes were fetched and uploaded successfully.
+      // Do not turn a valid API result into a failed job solely because the
+      // optional local Downloads copy was not acknowledged by the browser.
+      return {
+        ok: true,
+        filename: null,
+        imageUrl: uploaded.imageUrl,
+        mediaUrl: uploaded.mediaUrl,
+        objectKey: uploaded.objectKey,
+        localDownloadPending: true
+      };
     })().then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message }));
     return true;
   }
@@ -793,9 +805,3 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 });
-
-// An unpacked-extension reload starts a fresh service worker but does not
-// always emit onInstalled/onStartup. Start both lanes immediately so the
-// user does not have to open the popup and press "Chạy ngay".
-chrome.alarms.create("poll", { periodInMinutes: 0.1 });
-pollAll();

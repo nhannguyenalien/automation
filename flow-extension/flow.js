@@ -7,8 +7,8 @@ const labelText = element => `${element?.getAttribute?.("aria-label") || ""} ${e
 // caption can live in aria-labelledby, an associated <label>, or a sibling in
 // the radio wrapper. innerText alone is therefore empty on some Chrome/Windows
 // builds even though the control is announced correctly by accessibility APIs.
-function controlLabel(element) {
-  if (!element) return "";
+function controlLabels(element) {
+  if (!element) return [];
   const root = element.getRootNode?.() || document;
   const labelledBy = String(element.getAttribute?.("aria-labelledby") || "")
     .split(/\s+/)
@@ -34,7 +34,22 @@ function controlLabel(element) {
       .map(labelText),
     labelText(element.parentElement)
   ].map(value => value.replace(/\s+/g, " ").trim()).filter(Boolean);
-  return [...new Set(nearby)].sort((a, b) => a.length - b.length)[0] || "";
+  return [...new Set(nearby)].sort((a, b) => a.length - b.length);
+}
+
+function controlLabel(element) {
+  return controlLabels(element)[0] || "";
+}
+
+function matchesControlLabel(element, pattern) {
+  // Do not collapse the accessible name, visible caption and wrapper text to
+  // a single value before matching. Flow's radio controls can expose an icon
+  // as the shortest label while the useful caption (for example `x1`) lives
+  // in a sibling. Test every candidate and reset stateful regexes each time.
+  return controlLabels(element).some(value => {
+    pattern.lastIndex = 0;
+    return pattern.test(value);
+  });
 }
 
 async function waitFor(find, timeout = 180000, label = "phần tử") {
@@ -658,7 +673,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       return 3;
     };
     const bestMatchingControl = root => deepElements(selector, root)
-      .filter(el => visible(el) && pattern.test(controlLabel(el)))
+      .filter(el => visible(el) && matchesControlLabel(el, pattern))
       .sort((a, b) => rankControl(a) - rankControl(b) ||
         (a.getBoundingClientRect().width * a.getBoundingClientRect().height) -
         (b.getBoundingClientRect().width * b.getBoundingClientRect().height))[0] || null;
@@ -677,7 +692,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
       // The individual controls are still accessible, so use the visible
       // lower-screen control as a safe fallback (sidebar items sit higher).
       return deepElements(selector).filter(el => {
-        if (!visible(el) || !pattern.test(controlLabel(el))) return false;
+        if (!visible(el) || !matchesControlLabel(el, pattern)) return false;
         const rect = el.getBoundingClientRect();
         return rect.top > window.innerHeight * 0.35;
       }).sort((a, b) => rankControl(a) - rankControl(b) ||
@@ -711,10 +726,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
         if (!visible(el)) return false;
         const selected = el.getAttribute("aria-checked") === "true" ||
           el.checked === true || el.getAttribute("value") === "1";
-        const nearby = [
-          controlLabel(el)
-        ].filter(Boolean);
-        return selected && nearby.some(value => wantedType.test(value.trim()));
+        return selected && matchesControlLabel(el, wantedType);
       });
     const mediaType = await ensureMenuControl(
       type === "video"
@@ -728,9 +740,7 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
     // Re-resolve and click the radio itself if the first click did not stick.
     for (let attempt = 0; attempt < 2 && !selectedMediaType(); attempt += 1) {
       const radio = deepElements('[role="radio"],input[type="radio"]')
-        .find(el => visible(el) && [
-          controlLabel(el)
-        ].filter(Boolean).some(value => wantedType.test(value.trim())));
+        .find(el => visible(el) && matchesControlLabel(el, wantedType));
       if (!radio) break;
       await clickLikeUser(radio);
       await sleep(500);
