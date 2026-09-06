@@ -9,22 +9,32 @@ const labelText = element => `${element?.getAttribute?.("aria-label") || ""} ${e
 // builds even though the control is announced correctly by accessibility APIs.
 function controlLabel(element) {
   if (!element) return "";
+  const root = element.getRootNode?.() || document;
   const labelledBy = String(element.getAttribute?.("aria-labelledby") || "")
     .split(/\s+/)
     .filter(Boolean)
-    .map(id => labelText(document.getElementById(id)))
+    .map(id => labelText(root.getElementById?.(id) || document.getElementById(id)))
     .join(" ");
   const ownId = element.getAttribute?.("id");
   const associatedLabel = ownId
-    ? [...document.querySelectorAll("label")].find(label => label.htmlFor === ownId)
+    ? [...root.querySelectorAll?.("label") || [], ...document.querySelectorAll("label")]
+      .find(label => label.htmlFor === ownId)
     : null;
-  return [
+  // Flow's radio itself is often an icon-only element while its caption is a
+  // sibling inside a wrapper that contains both Image and Video. Returning
+  // the wrapper's combined text makes an exact Image match impossible. Add
+  // sibling/descendant captions and prefer the shortest useful label.
+  const nearby = [
     labelText(element),
     labelledBy,
     labelText(associatedLabel),
     labelText(element.closest?.("label")),
+    ...[...(element.parentElement?.children || [])]
+      .filter(child => child !== element)
+      .map(labelText),
     labelText(element.parentElement)
-  ].map(value => value.replace(/\s+/g, " ").trim()).find(Boolean) || "";
+  ].map(value => value.replace(/\s+/g, " ").trim()).filter(Boolean);
+  return [...new Set(nearby)].sort((a, b) => a.length - b.length)[0] || "";
 }
 
 async function waitFor(find, timeout = 180000, label = "phần tử") {
