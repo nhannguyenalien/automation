@@ -37,6 +37,25 @@ async function waitFor(find, timeout = 180000, label = "phần tử") {
   throw new Error(`Không tìm thấy ${label} sau ${Math.round(timeout / 1000)} giây`);
 }
 
+function isClosedRuntimeChannel(error) {
+  return /message channel closed|receiving end does not exist|could not establish connection/i.test(
+    String(error?.message || error || "")
+  );
+}
+
+async function sendRuntimeMessage(message, maxRetries = 3) {
+  let retries = 0;
+  while (true) {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      if (!isClosedRuntimeChannel(error) || retries >= maxRetries) throw error;
+      retries += 1;
+      await sleep(1000 * retries);
+    }
+  }
+}
+
 function clickByText(pattern, selector = "button,[role=button],[role=tab]") {
   // Flow renders some controls inside nested web components. Search those
   // roots too, then prefer the shortest label so `x1` selects the menu option
@@ -1008,7 +1027,7 @@ async function generate(task) {
     // navigation there, which destroys this content-script message channel.
     // The service worker opens a short-lived viewer tab and closes it after
     // prompt verification/download, leaving generation state untouched.
-    const inspected = await chrome.runtime.sendMessage({
+    const inspected = await sendRuntimeMessage({
       type: "INSPECT_IMAGE_URL",
       url: resultUrls[candidateIndex],
       prompt: task.prompt,
