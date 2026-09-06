@@ -278,6 +278,30 @@ async function ensureReady(tabId) {
   }
 }
 
+function isClosedMessageChannel(error) {
+  return /message channel closed|receiving end does not exist|could not establish connection/i.test(
+    String(error?.message || error || "")
+  );
+}
+
+async function sendTaskToFlowTab(tabId, message, maxNavigationRetries = 2) {
+  let navigationRetries = 0;
+  while (true) {
+    try {
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      // Flow currently canonicalises some projects from flow.google.com to
+      // labs.google/fx when the Image/Video settings control is opened. That
+      // full-document navigation destroys the content-script response port,
+      // even though the same tab and job are still valid. Wait for the newly
+      // injected script and continue the task without releasing its lease.
+      if (!isClosedMessageChannel(error) || navigationRetries >= maxNavigationRetries) throw error;
+      navigationRetries += 1;
+      await ensureReady(tabId);
+    }
+  }
+}
+
 async function poll(lane) {
   if (busyLanes[lane]) return;
   // Reserve the worker before the first await. Several startup/alarm/manual
@@ -323,7 +347,7 @@ async function poll(lane) {
     await ensureReady(tab.id);
     const messageType = task.type === "chat" ? "CHAT"
       : task.type === "image" && task.provider === "chatgpt" ? "GENERATE_IMAGE" : "GENERATE";
-    let result = await chrome.tabs.sendMessage(tab.id, { type: messageType, task });
+    let result = await sendTaskToFlowTab(tab.id, { type: messageType, task });
     if (!result?.ok) {
       const taskError = new Error(result?.error || "Content script xử lý thất bại");
       taskError.code = result?.errorCode || null;
