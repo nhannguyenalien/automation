@@ -39,9 +39,30 @@ function Restart-BrowserWorkers {
     Write-Output 'Reloaded browser workers after extension update.'
 }
 
+function Get-BrowserWorkerExecutable {
+    # Branded Chrome no longer accepts --load-extension. Chrome for Testing
+    # intentionally keeps automation flags and is the supported unattended
+    # browser for this dedicated VM.
+    $installRoot = 'C:\ChromeForTesting'
+    $executable = Join-Path $installRoot 'chrome-win64\chrome.exe'
+    if (Test-Path $executable) { return $executable }
+
+    $metadata = Invoke-RestMethod -TimeoutSec 30 -Uri 'https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json'
+    $download = @($metadata.channels.Stable.downloads.chrome | Where-Object { $_.platform -eq 'win64' })[0]
+    if (-not $download.url) { throw 'Chrome for Testing win64 download was not found.' }
+
+    $archive = Join-Path $env:TEMP 'chrome-for-testing-win64.zip'
+    Remove-Item $archive -Force -ErrorAction SilentlyContinue
+    Invoke-WebRequest -TimeoutSec 300 -Uri $download.url -OutFile $archive
+    New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+    Expand-Archive -Path $archive -DestinationPath $installRoot -Force
+    Remove-Item $archive -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $executable)) { throw 'Chrome for Testing installation failed.' }
+    return $executable
+}
+
 function Start-BrowserWorker {
-    $chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
-    if (-not (Test-Path $chrome)) { return }
+    $chrome = Get-BrowserWorkerExecutable
     $chromeArgs = @(
         '--user-data-dir=C:\ChromeProfile'
         '--load-extension=C:\Automation\flow-extension'
