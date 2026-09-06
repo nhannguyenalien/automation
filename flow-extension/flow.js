@@ -451,7 +451,10 @@ async function openFlowSection(type) {
     ? /(?:^|\s)(?:Video|Videos)\s*$/i
     : /(?:^|\s)(?:Hình ảnh|Images?|Xem hình ảnh|View images)\s*$/i;
   const target = await waitFor(() => {
-    const section = deepElements('a,button,[role="button"],[role="tab"],[role="link"]')
+    // The current Flow sidebar exposes its navigation entries as plain
+    // containers (no button/link role). Include text containers and rely on
+    // the exact label + left-sidebar geometry below to keep the match safe.
+    const section = deepElements('a,button,[role="button"],[role="tab"],[role="link"],div,span')
       .filter(element => {
         if (!visible(element) || !pattern.test(labelText(element))) return false;
         const rect = element.getBoundingClientRect();
@@ -641,10 +644,22 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
     await sleep(500);
     mode = await waitFor(() => {
       const current = findModeButton();
+      // September 2026 Flow keeps the settings popover open and replaces its
+      // controls in-place. The selected radio is more authoritative than the
+      // outer button text, which can briefly retain the previous mode.
+      const selectedType = deepElements('[role="radio"],input[type="radio"]')
+        .find(el => {
+          if (!visible(el)) return false;
+          const selected = el.getAttribute("aria-checked") === "true" ||
+            el.checked === true || el.getAttribute("value") === "1";
+          const wanted = type === "video"
+            ? /^(?:Video|Videos)$/i
+            : /^(?:Hình ảnh|Images?)$/i;
+          return selected && wanted.test(labelText(el).trim());
+        });
+      if (selectedType) return current || selectedType;
       if (!current) return null;
       const label = labelText(current);
-      // A successful click on the exact Image/Video menu item is authoritative.
-      // New Flow variants may leave the replacement button icon-only.
       const visiblyOpposite = type === "image"
         ? /Video|Veo/i.test(label)
         : /Nano Banana|Imagen|Hình ảnh|Image/i.test(label);
@@ -677,8 +692,14 @@ async function configure(ratio, type = "image", model = null, outputs = 1, hasRe
     // Follow the order confirmed manually in Flow: Video -> generation mode
     // -> ratio -> model -> x1. Selecting x1 closes the popover, so choose the
     // model first and make x1 the final menu action.
-    const modelButton = await ensureMenuControl(/Veo\s*(?:2|3)(?:\.\d+)?/i, "nút chọn model Veo");
-    if (!/Veo\s*3\.1\s*[-–—]?\s*(?:Lite|Nhanh)/i.test(labelText(modelButton))) {
+    // The latest UI labels this trigger generically as "Chọn nhóm mô hình"
+    // instead of showing the selected Veo version on the button.
+    const modelButton = await ensureMenuControl(
+      /Veo\s*(?:2|3)(?:\.\d+)?|Chọn nhóm mô hình|Select model group|Choose model/i,
+      "nút chọn model Veo"
+    );
+    const genericModelButton = /Chọn nhóm mô hình|Select model group|Choose model/i.test(labelText(modelButton));
+    if (genericModelButton || !/Veo\s*3\.1\s*[-–—]?\s*(?:Lite|Nhanh)/i.test(labelText(modelButton))) {
       await clickLikeUser(modelButton);
       await sleep(400);
       await waitAndClickByText(
