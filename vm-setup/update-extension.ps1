@@ -53,7 +53,9 @@ function Get-BrowserWorkerExecutable {
 
     $archive = Join-Path $env:TEMP 'chrome-for-testing-win64.zip'
     Remove-Item $archive -Force -ErrorAction SilentlyContinue
-    Invoke-WebRequest -TimeoutSec 300 -Uri $download.url -OutFile $archive
+    $curl = Join-Path $env:SystemRoot 'System32\curl.exe'
+    & $curl -L --fail --retry 3 --output $archive $download.url
+    if ($LASTEXITCODE -ne 0) { throw "Chrome for Testing download failed with exit code $LASTEXITCODE." }
     New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
     Expand-Archive -Path $archive -DestinationPath $installRoot -Force
     Remove-Item $archive -Force -ErrorAction SilentlyContinue

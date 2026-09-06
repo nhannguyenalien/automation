@@ -310,6 +310,33 @@ async function recoverInterruptedJobs() {
   }
 }
 
+async function migrateLegacyExtensionJobs() {
+  if (extensionQueueWorker === "extension") return;
+  const transaction = await database.transaction("write");
+  try {
+    const result = await transaction.execute({
+      sql: "SELECT id, payload FROM jobs WHERE worker = 'extension' AND status = 'queued'",
+      args: []
+    });
+    for (const row of result.rows) {
+      const job = JSON.parse(String(row.payload));
+      job.worker = extensionQueueWorker;
+      await transaction.execute({
+        sql: "UPDATE jobs SET worker = ?, payload = ? WHERE id = ? AND worker = 'extension' AND status = 'queued'",
+        args: [extensionQueueWorker, JSON.stringify(job), String(row.id)]
+      });
+    }
+    await transaction.commit();
+  } catch (error) {
+    await transaction.rollback();
+    throw error;
+  }
+}
+
+// Releases before worker queue scoping stored every browser job under the
+// generic `extension` queue. Move those waiting jobs into this deployment's
+// sole configured worker pool so an upgrade cannot strand them forever.
+await migrateLegacyExtensionJobs();
 await recoverInterruptedJobs();
 
 async function claimExtensionJob(workerId, requestedTypes, capabilities) {
