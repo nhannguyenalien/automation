@@ -46,7 +46,9 @@ services:
       FLOW_API_KEY: ${FLOW_API_KEY:?Set FLOW_API_KEY in Coolify}
       FLOW_EXTENSION_API_URL: http://backend:8787
       FLOW_EXTENSION_WORKER_ID: ${FLOW_EXTENSION_WORKER_ID:-coolify-chrome}
-      FLOW_EXTENSION_ENABLED: ${FLOW_EXTENSION_ENABLED:-true}
+      # Do not let an unattended container claim paid media jobs before its
+      # Google session has been opened and verified through noVNC.
+      FLOW_EXTENSION_ENABLED: ${FLOW_EXTENSION_ENABLED:-false}
       FLOW_EXTENSION_FORCE_CONFIG: ${FLOW_EXTENSION_FORCE_CONFIG:-true}
       FLOW_START_URL: ${FLOW_START_URL:-https://gemini.google.com/app}
       CHROME_SCREEN: ${CHROME_SCREEN:-1920x1080x24}

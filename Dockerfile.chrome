@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DISPLAY=:99 \
     FLOW_EXTENSION_API_URL=http://backend:8787 \
     FLOW_EXTENSION_WORKER_ID=coolify-chrome \
-    FLOW_EXTENSION_ENABLED=true \
+    FLOW_EXTENSION_ENABLED=false \
     FLOW_EXTENSION_FORCE_CONFIG=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -11,7 +11,8 @@ if [ "$(id -u)" = "0" ]; then
   api_url=${FLOW_EXTENSION_API_URL:-http://backend:8787}
   api_key=${FLOW_API_KEY:-}
   worker_id=${FLOW_EXTENSION_WORKER_ID:-coolify-chrome}
-  enabled=${FLOW_EXTENSION_ENABLED:-true}
+  # Opt in only after the persistent Chrome profile is signed in and tested.
+  enabled=${FLOW_EXTENSION_ENABLED:-false}
   force=${FLOW_EXTENSION_FORCE_CONFIG:-true}
   jq -n \
     --arg apiUrl "$api_url" \
