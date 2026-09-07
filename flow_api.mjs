@@ -701,11 +701,21 @@ const server = http.createServer(async (req, res) => {
         return send(res, 409, { error: "Browser worker restart is only available on Windows" });
       }
       const script = path.join(root, "vm-setup", "restart-browser-worker.ps1");
-      const child = spawn("powershell.exe", [
-        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script
-      ], { cwd: root, detached: true, stdio: "ignore" });
-      child.unref();
-      return send(res, 202, { ok: true, message: "Browser worker is restarting" });
+      const result = await new Promise((resolve) => {
+        const child = spawn("powershell.exe", [
+          "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script
+        ], { cwd: root, windowsHide: true });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", chunk => { stdout += chunk; });
+        child.stderr.on("data", chunk => { stderr += chunk; });
+        child.on("error", error => resolve({ code: -1, error: error.message }));
+        child.on("close", code => resolve({ code, stdout: stdout.trim(), stderr: stderr.trim() }));
+      });
+      if (result.code !== 0) {
+        return send(res, 500, { error: result.stderr || result.error || `Restart exited with code ${result.code}` });
+      }
+      return send(res, 200, { ok: true, message: result.stdout || "Browser worker restarted" });
     }
 
     if (url.pathname === "/assets" && req.method === "POST") {
