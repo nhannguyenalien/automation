@@ -7,7 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 import { CreateBucketCommand, HeadBucketCommand, PutBucketPolicyCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { normalizeCapabilities, workerCanRun, workerRetryReady } from "./worker-routing.mjs";
+import { applyChatProviderFallback, normalizeCapabilities, workerCanRun, workerRetryReady } from "./worker-routing.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const runtimeDir = path.join(root, ".flow-api");
@@ -1088,6 +1088,17 @@ const server = http.createServer(async (req, res) => {
       job.logs.push(body.ok ? `Prompt ${index + 1} hoàn tất` : `Prompt ${index + 1} lỗi: ${result.error}`);
       job.lease = null;
       if (!body.ok) {
+        const fellBackToGemini = applyChatProviderFallback(
+          job,
+          index,
+          result.error,
+          process.env.GEMINI_CHAT_URL || "https://gemini.google.com/app"
+        );
+        if (fellBackToGemini) {
+          await saveJob(job);
+          await database.execute({ sql: "UPDATE extension_workers SET last_error = ? WHERE worker_id = ?", args: [result.error, leaseWorkerId] });
+          return send(res, 200, { ok: true, status: job.status, fallback: "gemini" });
+        }
         job.workerRetryAfter ||= {};
         job.workerRetryAfter[index] ||= {};
         const providerQuota = result.errorCode === "provider_quota";

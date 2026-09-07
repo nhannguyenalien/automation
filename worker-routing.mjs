@@ -32,3 +32,29 @@ export function workerRetryReady(job, index, workerId, now = Date.now()) {
   return !retryAfter || retryAfter <= now;
 }
 
+export function applyChatProviderFallback(job, index, error, geminiChatUrl = "https://gemini.google.com/app") {
+  if ((job.type || "image") !== "chat" || (job.provider || "gemini") !== "chatgpt") return false;
+  job.chatProviderFallbacks ||= {};
+  if (job.chatProviderFallbacks[index]) return false;
+
+  job.chatProviderFallbacks[index] = {
+    from: "chatgpt",
+    to: "gemini",
+    error: String(error || "ChatGPT không khả dụng"),
+    at: new Date().toISOString()
+  };
+  job.provider = "gemini";
+  job.model = "3.5-flash-lite";
+  job.chatUrl = geminiChatUrl;
+  job.newConversation = true;
+  job.failoverMaxAttempts ||= {};
+  job.failoverMaxAttempts[index] = Math.max(
+    Number(job.failoverMaxAttempts[index] || 0),
+    Number(job.attempts?.[index] || 1) + 1
+  );
+  if (job.workerRetryAfter?.[index]) delete job.workerRetryAfter[index];
+  job.status = "queued";
+  job.logs ||= [];
+  job.logs.push(`ChatGPT lỗi; tự động chuyển prompt ${index + 1} sang Gemini 3.5 Flash Lite`);
+  return true;
+}
