@@ -518,6 +518,14 @@ async function attachReference(dataUrl, type = "image") {
 }
 
 async function openFlowSection(type) {
+  // An expired Google session redirects project URLs to Flow's public Tools
+  // landing page. Report the actual blocker immediately instead of waiting
+  // 60 seconds for project-only sidebar controls which cannot exist here.
+  if (/\/tools\/flow\/?(?:#tools)?$/i.test(location.pathname + location.hash) ||
+      (/Google Flow/i.test(document.title) &&
+       /Build tools for your specific creative workflows/i.test(document.body?.innerText || ""))) {
+    throw new Error("auth_required: Google Flow trên worker đã đăng xuất; hãy đăng nhập lại profile Chrome Windows");
+  }
   const pattern = type === "video"
     ? /(?:^|\s)(?:Video|Videos)\s*$/i
     : /(?:^|\s)(?:Hình ảnh|Images?|Xem hình ảnh|View images)\s*$/i;

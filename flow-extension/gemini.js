@@ -143,7 +143,9 @@ async function selectModel(model) {
     "3.1-pro": /3\.1\s*Pro/i
   };
   const selectedLabels = {
-    "3.5-flash-lite": /(?:hiện tại là|currently)?\s*(?:Gemini\s*)?3\.5\s*Flash(?:\s*[-–—]\s*|\s+)Lite/i,
+    // Some consumer Gemini accounts now abbreviate the selected model to
+    // just `Flash-Lite` in the composer. It is the same default model.
+    "3.5-flash-lite": /(?:hiện tại là|currently)?\s*(?:Gemini\s*)?(?:3\.5\s*)?Flash(?:\s*[-–—]\s*|\s+)Lite/i,
     "3.1-pro": /(?:hiện tại là|currently)\s+Pro\b|^\s*Pro\b/i
   };
   const wanted = labels[requested];
@@ -152,7 +154,13 @@ async function selectModel(model) {
 
   const picker = await waitFor(() => [...document.querySelectorAll("button")].find(button => {
     const label = `${button.getAttribute("aria-label") || ""} ${nodeText(button)}`;
-    return visible(button) && /mở công cụ chọn chế độ|open mode selector/i.test(label);
+    if (!visible(button)) return false;
+    if (/mở công cụ chọn chế độ|open mode selector/i.test(label)) return true;
+    // The new UI removed the descriptive aria-label and exposes only the
+    // selected model text plus a chevron on the composer button.
+    if (!selected.test(label)) return false;
+    const rect = button.getBoundingClientRect();
+    return rect.top > window.innerHeight * 0.45 && rect.width < 260 && rect.height < 100;
   }), 15000, "nút chọn model Gemini");
   if (selected.test(`${picker.getAttribute("aria-label") || ""} ${nodeText(picker)}`)) return;
 
