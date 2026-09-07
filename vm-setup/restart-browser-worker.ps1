@@ -9,7 +9,9 @@ if (-not (Test-Path $chrome)) { throw "Chrome for Testing not found: $chrome" }
 if (-not (Test-Path (Join-Path $extension 'manifest.json'))) { throw "Extension not found: $extension" }
 
 # Let the API finish its HTTP response before the browser connection drops.
-& "$env:SystemRoot\System32\taskkill.exe" /F /T /IM chrome.exe 2>$null | Out-Null
+if (Get-Process -Name chrome -ErrorAction SilentlyContinue) {
+    & "$env:SystemRoot\System32\taskkill.exe" /F /T /IM chrome.exe 2>$null | Out-Null
+}
 Start-Sleep -Seconds 3
 $remaining = Get-Process -Name chrome -ErrorAction SilentlyContinue
 if ($remaining) { throw "Could not stop $(@($remaining).Count) existing Chrome process(es)" }
