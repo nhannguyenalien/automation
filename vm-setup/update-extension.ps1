@@ -33,9 +33,7 @@ function Restart-BrowserWorkers {
     # repeat --user-data-dir in their command lines, so stopping only the
     # matching root can leave the existing browser process group alive. A new
     # launch then reuses that group and silently ignores --load-extension.
-    Get-Process -Name chrome -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 3
-    Start-BrowserWorker
+    & (Join-Path $installDir 'vm-setup\restart-browser-worker.ps1')
     Write-Output 'Reloaded browser workers after extension update.'
 }
 
@@ -64,15 +62,8 @@ function Get-BrowserWorkerExecutable {
 }
 
 function Start-BrowserWorker {
-    $chrome = Get-BrowserWorkerExecutable
-    $chromeArgs = @(
-        '--user-data-dir=C:\ChromeProfile'
-        '--load-extension=C:\Automation\flow-extension'
-        '--no-first-run'
-        '--no-default-browser-check'
-        'https://gemini.google.com/app'
-    )
-    Start-Process -FilePath $chrome -ArgumentList $chromeArgs
+    Get-BrowserWorkerExecutable | Out-Null
+    & (Join-Path $installDir 'vm-setup\restart-browser-worker.ps1')
 }
 
 function Ensure-BrowserWorker {
