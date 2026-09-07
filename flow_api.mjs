@@ -41,7 +41,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-07-chatgpt-gemini-fallback-v1";
+const apiRelease = "2026-09-07-chat-worker-reload-v1";
 const githubRepository = process.env.FLOW_GITHUB_REPOSITORY || "nhannguyenalien/automation";
 const extensionDownloadUrl = `https://github.com/${githubRepository}/releases/latest/download/Google-AI-Browser-Worker.zip`;
 const extensionManifestPath = path.join(root, "flow-extension", "manifest.json");
@@ -695,6 +695,18 @@ const server = http.createServer(async (req, res) => {
       return sendText(res, 200, schema, "application/json; charset=utf-8");
     }
     if (!authorized(req)) return send(res, 401, { error: "Unauthorized" });
+
+    if (url.pathname === "/extension/restart-browser" && req.method === "POST") {
+      if (process.platform !== "win32") {
+        return send(res, 409, { error: "Browser worker restart is only available on Windows" });
+      }
+      const script = path.join(root, "vm-setup", "restart-browser-worker.ps1");
+      const child = spawn("powershell.exe", [
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script
+      ], { cwd: root, detached: true, stdio: "ignore" });
+      child.unref();
+      return send(res, 202, { ok: true, message: "Browser worker is restarting" });
+    }
 
     if (url.pathname === "/assets" && req.method === "POST") {
       const contentType = String(req.headers["content-type"] || "").split(";")[0].toLowerCase();
