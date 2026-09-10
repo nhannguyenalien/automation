@@ -115,10 +115,10 @@ Tạo ảnh. Dùng `prompt` cho một ảnh hoặc `prompts` cho batch; response
 |---|---|---:|---|
 | `prompt` | string | một trong hai | Một prompt |
 | `prompts` | string[] | một trong hai | Danh sách prompt chạy tuần tự |
-| `provider` | string | không | `flow` (mặc định) hoặc `chatgpt` |
-| `worker` | string | không | `extension` hoặc `playwright` |
+| `provider` | string | không | `flow` (mặc định), `chatgpt` hoặc `cloudflare` (FLUX.2 Klein 4B) |
+| `worker` | string | không | `extension` hoặc `playwright`; provider `cloudflare` tự chọn Worker AI |
 | `ratio` | string | không | Mặc định `16:9` |
-| `outputs` | integer | không | `1`–`4`, mặc định `1`; số ảnh tạo cho mỗi prompt; giá trị lớn hơn 1 chỉ hỗ trợ extension |
+| `outputs` | integer | không | `1`–`4`, mặc định `1`; số ảnh tạo cho mỗi prompt; giá trị lớn hơn 1 hỗ trợ extension và Cloudflare |
 | `referenceImageUrl` | string | không | URL HTTP(S) ảnh gốc; chỉ extension |
 | `delayMs` | number | không | Tối thiểu 5000; mặc định 15000 |
 | `timeoutMs` | number | không | Tối thiểu 30000; mặc định 180000 |

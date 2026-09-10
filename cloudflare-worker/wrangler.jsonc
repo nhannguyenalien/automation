@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "image-ai-flux-klein",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-10",
+  "ai": { "binding": "AI" },
+  "vars": {
+    "MODEL": "@cf/black-forest-labs/flux-2-klein-4b"
+  }
+}

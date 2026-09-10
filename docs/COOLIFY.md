@@ -26,6 +26,9 @@ S3_ENDPOINT=https://...
 S3_ACCESS_KEY=...
 S3_SECRET_KEY=...
 S3_PUBLIC_URL=https://.../flow-images
+CLOUDFLARE_WORKER_URL=https://image-ai-flux-klein.toidayhoc.workers.dev
+CLOUDFLARE_WORKER_TOKEN=<cung-secret-API_TOKEN-cua-Worker>
+CLOUDFLARE_WORKER_TIMEOUT_MS=120000
 NOVNC_PASSWORD=<mat-khau-noVNC-manh>
 ```
 
@@ -58,6 +61,15 @@ curl https://API_DOMAIN/health
 ```
 
 Sau đó gửi một job nhỏ. Extension đã được container cấu hình tự động bằng `FLOW_API_KEY`, worker ID và URL backend nội bộ; không cần nhập lại trong popup.
+
+Smoke test Cloudflare FLUX.2 Klein 4B:
+
+```bash
+curl -sS -X POST https://API_DOMAIN/generate \
+  -H 'Authorization: Bearer YOUR_FLOW_API_KEY' \
+  -H 'Content-Type: application/json' \
+  --data '{"provider":"cloudflare","ratio":"1:1","outputs":1,"prompt":"A tiny orange robot watering a sunflower"}'
+```
 
 Smoke test ảnh ChatGPT:
 

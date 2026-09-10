@@ -41,7 +41,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-08-chat-worker-interactive-reload-v1";
+const apiRelease = "2026-09-10-cloudflare-flux-klein-v1";
 const githubRepository = process.env.FLOW_GITHUB_REPOSITORY || "nhannguyenalien/automation";
 const extensionDownloadUrl = `https://github.com/${githubRepository}/releases/latest/download/Google-AI-Browser-Worker.zip`;
 const extensionManifestPath = path.join(root, "flow-extension", "manifest.json");
@@ -97,6 +97,10 @@ const s3SecretKey = process.env.S3_SECRET_KEY || "";
 const s3PublicUrl = String(process.env.S3_PUBLIC_URL || `${s3Endpoint}/${s3Bucket}`).replace(/\/$/, "");
 const s3ManageBucket = /^(1|true|yes)$/i.test(process.env.S3_MANAGE_BUCKET || "false");
 const s3Configured = Boolean(s3Endpoint && s3AccessKey && s3SecretKey);
+const cloudflareWorkerUrl = String(process.env.CLOUDFLARE_WORKER_URL || "").replace(/\/$/, "");
+const cloudflareWorkerToken = String(process.env.CLOUDFLARE_WORKER_TOKEN || "");
+const cloudflareWorkerTimeoutMs = Math.max(10000, Number(process.env.CLOUDFLARE_WORKER_TIMEOUT_MS || 120000));
+const cloudflareConfigured = Boolean(cloudflareWorkerUrl && cloudflareWorkerToken);
 const s3 = s3Configured ? new S3Client({
   endpoint: s3Endpoint,
   region: s3Region,
@@ -576,6 +580,63 @@ async function ensurePublicBucket() {
   await s3.send(new PutBucketPolicyCommand({ Bucket: s3Bucket, Policy: JSON.stringify(policy) }));
 }
 
+const cloudflareDimensions = Object.freeze({
+  "16:9": [1344, 768], "4:3": [1152, 864], "1:1": [1024, 1024],
+  "3:4": [864, 1152], "9:16": [768, 1344]
+});
+
+async function uploadGeneratedImage(job, index, output, data, contentType = "image/png") {
+  if (!s3) throw new Error("S3 storage chưa được cấu hình");
+  const extension = contentType === "image/webp" ? "webp" : contentType === "image/jpeg" ? "jpg" : "png";
+  const objectKey = `jobs/${job.id}/${String(index + 1).padStart(3, "0")}-${String(output).padStart(2, "0")}-${Date.now()}.${extension}`;
+  await s3.send(new PutObjectCommand({
+    Bucket: s3Bucket, Key: objectKey, Body: data, ContentType: contentType,
+    CacheControl: "public, max-age=31536000, immutable"
+  }));
+  return `${s3PublicUrl}/${objectKey.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+async function runCloudflareJob(job) {
+  job.status = "running";
+  job.startedAt = new Date().toISOString();
+  await saveJob(job);
+  try {
+    const [width, height] = cloudflareDimensions[job.ratio];
+    for (let index = 0; index < job.prompts.length; index += 1) {
+      const imageUrls = [];
+      for (let output = 1; output <= job.outputs; output += 1) {
+        job.attempts[index] += 1;
+        const response = await fetch(`${cloudflareWorkerUrl}/generate`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${cloudflareWorkerToken}`, "content-type": "application/json" },
+          body: JSON.stringify({ prompt: job.prompts[index], width, height }),
+          signal: AbortSignal.timeout(cloudflareWorkerTimeoutMs)
+        });
+        if (!response.ok) {
+          const detail = await response.text();
+          throw new Error(`Cloudflare Worker ${response.status}: ${detail.slice(0, 500)}`);
+        }
+        const contentType = String(response.headers.get("content-type") || "image/png").split(";")[0];
+        const data = Buffer.from(await response.arrayBuffer());
+        imageUrls.push(await uploadGeneratedImage(job, index, output, data, contentType));
+      }
+      job.results[index] = { ok: true, imageUrl: imageUrls[0], imageUrls };
+      job.logs.push(`Cloudflare FLUX hoàn tất prompt ${index + 1}/${job.prompts.length}`);
+      await saveJob(job);
+    }
+    job.status = "completed";
+    job.finishedAt = new Date().toISOString();
+  } catch (error) {
+    const index = job.results.findIndex(result => result === null);
+    if (index >= 0) job.results[index] = { ok: false, error: error.message, errorCode: "cloudflare_error" };
+    job.status = "failed";
+    job.error = error.message;
+    job.finishedAt = new Date().toISOString();
+    job.logs.push(`Cloudflare FLUX lỗi: ${error.message}`);
+  }
+  await saveJob(job);
+}
+
 function authorized(req) {
   if (!apiKey) return true;
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "") || req.headers["x-api-key"];
@@ -657,7 +718,10 @@ const server = http.createServer(async (req, res) => {
           online: extensionWorkers.filter(worker => worker.online && worker.enabled).length,
           total: extensionWorkers.length },
         database: { type: "turso", persistent: true, connected: true },
-        storage: { configured: s3Configured, bucket: s3Configured ? s3Bucket : null }
+        storage: { configured: s3Configured, bucket: s3Configured ? s3Bucket : null },
+        providers: {
+          cloudflare: { configured: cloudflareConfigured, model: "flux-2-klein-4b" }
+        }
       });
     }
     if ((url.pathname === "/docs" || url.pathname === "/docs/") && req.method === "GET") {
@@ -744,8 +808,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/generate" && req.method === "POST") {
       const body = await readJson(req);
       const provider = String(body.provider || "flow").toLowerCase();
-      if (!new Set(["flow", "chatgpt"]).has(provider)) {
-        return send(res, 400, { error: "provider chỉ nhận flow hoặc chatgpt" });
+      if (!new Set(["flow", "chatgpt", "cloudflare"]).has(provider)) {
+        return send(res, 400, { error: "provider chỉ nhận flow, chatgpt hoặc cloudflare" });
       }
       const prompts = Array.isArray(body.prompts) ? body.prompts : body.prompt ? [body.prompt] : [];
       if (!prompts.length || prompts.some(x => typeof x !== "string" || !x.trim())) return send(res, 400, { error: "Cần prompt hoặc prompts[]" });
@@ -756,16 +820,19 @@ const server = http.createServer(async (req, res) => {
       if (!Number.isInteger(outputs) || outputs < 1 || outputs > 4) {
         return send(res, 400, { error: "outputs phải là số nguyên từ 1 đến 4" });
       }
-      const worker = body.worker || defaultWorker;
-      if (!new Set(["playwright", "extension"]).has(worker)) return send(res, 400, { error: "worker không hợp lệ" });
-      if (outputs > 1 && worker !== "extension") {
-        return send(res, 400, { error: "outputs lớn hơn 1 hiện chỉ hỗ trợ worker extension" });
+      const worker = provider === "cloudflare" ? "cloudflare" : (body.worker || defaultWorker);
+      if (!new Set(["playwright", "extension", "cloudflare"]).has(worker)) return send(res, 400, { error: "worker không hợp lệ" });
+      if (outputs > 1 && !new Set(["extension", "cloudflare"]).has(worker)) {
+        return send(res, 400, { error: "outputs lớn hơn 1 hiện chỉ hỗ trợ worker extension hoặc cloudflare" });
       }
       if (provider === "chatgpt" && worker !== "extension") {
         return send(res, 400, { error: "Tạo ảnh ChatGPT chỉ hỗ trợ worker extension" });
       }
       if (provider === "chatgpt" && outputs !== 1) {
         return send(res, 400, { error: "Tạo ảnh ChatGPT hiện chỉ hỗ trợ outputs = 1" });
+      }
+      if (provider === "cloudflare" && !cloudflareConfigured) {
+        return send(res, 503, { error: "Backend chưa cấu hình CLOUDFLARE_WORKER_URL/TOKEN" });
       }
       const requestedImages = prompts.length * outputs;
       if (requestedImages > maxImagesPerJob) {
@@ -774,6 +841,9 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const referenceImageUrl = body.referenceImageUrl ? String(body.referenceImageUrl) : null;
+      if (provider === "cloudflare" && referenceImageUrl) {
+        return send(res, 400, { error: "Cloudflare provider hiện chỉ hỗ trợ text-to-image trong API này" });
+      }
       if (referenceImageUrl && !/^https?:\/\//i.test(referenceImageUrl)) return send(res, 400, { error: "referenceImageUrl phải là URL HTTP(S)" });
       if (referenceImageUrl && worker !== "extension") return send(res, 400, { error: "Ảnh tham chiếu hiện chỉ hỗ trợ worker extension" });
       if (referenceImageUrl && provider === "chatgpt") return send(res, 400, { error: "Ảnh tham chiếu ChatGPT chưa được hỗ trợ" });
@@ -798,7 +868,7 @@ const server = http.createServer(async (req, res) => {
       if (await queuedCount() >= maxQueued) return send(res, 429, { error: `Hàng đợi đã đầy (${maxQueued} job)` });
       const id = identity?.id || `${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
       const job = {
-        id, type: "image", provider, prompts: prompts.map(x => x.trim()), ratio, outputs,
+        id, type: "image", provider, model: provider === "cloudflare" ? "flux-2-klein-4b" : null, prompts: prompts.map(x => x.trim()), ratio, outputs,
         delayMs, timeoutMs, projectUrl,
         worker: worker === "extension" ? extensionQueueWorker : worker,
         referenceImageUrl, status: "queued", createdAt: new Date().toISOString(), logs: [], images: [],
@@ -824,6 +894,8 @@ const server = http.createServer(async (req, res) => {
       }
       if (worker === "playwright") {
         void runQueue();
+      } else if (worker === "cloudflare") {
+        void runCloudflareJob(job);
       }
       return sendSubmittedJob(res, job, req);
     }

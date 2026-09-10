@@ -154,7 +154,17 @@ Mọi client vẫn gọi một Base URL duy nhất. Mỗi máy Chrome đặt m�
 
 ### 4. Tạo một ảnh từ text
 
-Mặc định `/generate` dùng Google Flow (`provider: "flow"`). Để dùng phiên đăng nhập ChatGPT web, gửi `provider: "chatgpt"`; chế độ này hiện yêu cầu extension, `outputs: 1` và chưa hỗ trợ ảnh tham chiếu.
+Mặc định `/generate` dùng Google Flow (`provider: "flow"`). Gửi `provider: "cloudflare"` để chạy FLUX.2 Klein 4B trực tiếp qua Workers AI (không cần Chrome), hoặc `provider: "chatgpt"` để dùng phiên đăng nhập ChatGPT web.
+
+Ví dụ Cloudflare FLUX.2 Klein 4B:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8787/generate \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: flux-klein-UNIQUE_ID' \
+  --data '{"provider":"cloudflare","ratio":"1:1","outputs":1,"prompt":"A tiny robot painter, studio light"}'
+```
 
 ```bash
 export FLOW_CLIENT_KEY='replace-with-a-long-random-secret'
@@ -382,6 +392,9 @@ Nếu S3 chưa cấu hình, extension worker mới sẽ báo lỗi thay vì hoà
 | `S3_ACCESS_KEY` | rỗng | Access key của service account |
 | `S3_SECRET_KEY` | rỗng | Secret key của service account |
 | `S3_PUBLIC_URL` | endpoint + bucket | Public base URL trả cho client |
+| `CLOUDFLARE_WORKER_URL` | trống | URL Worker FLUX.2 Klein 4B đã deploy |
+| `CLOUDFLARE_WORKER_TOKEN` | trống | Bearer secret dùng giữa backend và Worker |
+| `CLOUDFLARE_WORKER_TIMEOUT_MS` | `120000` | Timeout mỗi lần gọi Worker AI, tối thiểu 10 giây |
 | `S3_MANAGE_BUCKET` | `false` | `true` chỉ lúc bootstrap để tạo bucket/cập nhật public policy |
 
 ## Hai worker có trong source
