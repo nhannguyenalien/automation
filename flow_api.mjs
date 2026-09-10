@@ -41,7 +41,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-10-cloudflare-flux-klein-img2img-v1";
+const apiRelease = "2026-09-10-cloudflare-flux-klein-img2img-v2";
 const githubRepository = process.env.FLOW_GITHUB_REPOSITORY || "nhannguyenalien/automation";
 const extensionDownloadUrl = `https://github.com/${githubRepository}/releases/latest/download/Google-AI-Browser-Worker.zip`;
 const extensionManifestPath = path.join(root, "flow-extension", "manifest.json");
@@ -604,7 +604,10 @@ async function runCloudflareJob(job) {
     const [width, height] = cloudflareDimensions[job.ratio];
     let referenceImage = null;
     if (job.referenceImageUrl) {
-      const response = await fetch(job.referenceImageUrl, { signal: AbortSignal.timeout(30000) });
+      const headers = job.referenceImageRequiresAuth && apiKey
+        ? { authorization: `Bearer ${apiKey}` }
+        : undefined;
+      const response = await fetch(job.referenceImageUrl, { headers, signal: AbortSignal.timeout(30000) });
       if (!response.ok) throw new Error(`Không tải được ảnh tham chiếu (${response.status})`);
       const contentType = String(response.headers.get("content-type") || "").split(";")[0].toLowerCase();
       if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(contentType)) {
@@ -868,6 +871,13 @@ const server = http.createServer(async (req, res) => {
       }
       const projectUrl = provider === "flow" ? flowProjectUrl : null;
       const maxRetries = Math.max(0, Math.min(5, Number(body.maxRetries ?? defaultImageMaxRetries)));
+      let referenceImageRequiresAuth = false;
+      if (referenceImageUrl) {
+        const reference = new URL(referenceImageUrl);
+        const ownOrigin = new URL(publicOrigin(req));
+        referenceImageRequiresAuth = reference.origin === ownOrigin.origin
+          && /^\/assets\/[a-zA-Z0-9.-]+$/.test(reference.pathname);
+      }
       const identity = idempotentIdentity(req, body, "image", {
         prompts: prompts.map(x => x.trim()), provider, ratio, outputs, worker, referenceImageUrl,
         delayMs, timeoutMs, projectUrl, maxRetries
@@ -885,7 +895,7 @@ const server = http.createServer(async (req, res) => {
         id, type: "image", provider, model: provider === "cloudflare" ? "flux-2-klein-4b" : null, prompts: prompts.map(x => x.trim()), ratio, outputs,
         delayMs, timeoutMs, projectUrl,
         worker: worker === "extension" ? extensionQueueWorker : worker,
-        referenceImageUrl, status: "queued", createdAt: new Date().toISOString(), logs: [], images: [],
+        referenceImageUrl, referenceImageRequiresAuth, status: "queued", createdAt: new Date().toISOString(), logs: [], images: [],
         results: Array(prompts.length).fill(null), attempts: Array(prompts.length).fill(0),
         maxRetries, batchSize: imageBatchSize, lease: null,
         idempotencyKeyHash: identity?.keyHash || null,
