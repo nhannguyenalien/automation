@@ -43,7 +43,7 @@ Cloudflare JSON: {"provider":"cloudflare","prompt":"...","ratio":"1:1","outputs"
 Batch: use prompts[]. Maximum 100 prompts per job. Default outputs is 1.
 Allowed ratios: 16:9, 4:3, 1:1, 3:4, 9:16.
 ChatGPT image currently requires extension, outputs=1, and no referenceImageUrl.
-Cloudflare uses Workers AI model FLUX.2 Klein 4B (response model: flux-2-klein-4b), needs no browser/extension, supports outputs=1..4, and does not accept referenceImageUrl.
+Cloudflare uses Workers AI model FLUX.2 Klein 4B (response model: flux-2-klein-4b), needs no browser/extension, supports outputs=1..4 and one referenceImageUrl (JPEG/PNG/WebP, maximum 5 MB).
 Result: images[].
 
 ## Upload a reference image
@@ -54,7 +54,8 @@ The response contains url. Use that URL as referenceImageUrl.
 ## Image-to-image
 
 POST /generate
-JSON: {"prompt":"...","referenceImageUrl":"https://...","ratio":"16:9","outputs":1,"worker":"extension"}
+Flow JSON: {"provider":"flow","prompt":"...","referenceImageUrl":"https://...","ratio":"16:9","outputs":1,"worker":"extension"}
+Cloudflare JSON: {"provider":"cloudflare","prompt":"Turn image 0 into a watercolor painting","referenceImageUrl":"https://...","ratio":"1:1","outputs":1}
 Result: images[].
 
 ## Text-to-video

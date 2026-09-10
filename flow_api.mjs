@@ -41,7 +41,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-10-cloudflare-flux-klein-v1";
+const apiRelease = "2026-09-10-cloudflare-flux-klein-img2img-v1";
 const githubRepository = process.env.FLOW_GITHUB_REPOSITORY || "nhannguyenalien/automation";
 const extensionDownloadUrl = `https://github.com/${githubRepository}/releases/latest/download/Google-AI-Browser-Worker.zip`;
 const extensionManifestPath = path.join(root, "flow-extension", "manifest.json");
@@ -602,14 +602,31 @@ async function runCloudflareJob(job) {
   await saveJob(job);
   try {
     const [width, height] = cloudflareDimensions[job.ratio];
+    let referenceImage = null;
+    if (job.referenceImageUrl) {
+      const response = await fetch(job.referenceImageUrl, { signal: AbortSignal.timeout(30000) });
+      if (!response.ok) throw new Error(`Không tải được ảnh tham chiếu (${response.status})`);
+      const contentType = String(response.headers.get("content-type") || "").split(";")[0].toLowerCase();
+      if (!new Set(["image/jpeg", "image/png", "image/webp"]).has(contentType)) {
+        throw new Error("Ảnh tham chiếu phải là JPEG, PNG hoặc WebP");
+      }
+      const data = Buffer.from(await response.arrayBuffer());
+      if (!data.length || data.length > 5 * 1024 * 1024) throw new Error("Ảnh tham chiếu phải có dung lượng từ 1 byte đến 5 MB");
+      referenceImage = { data, contentType };
+    }
     for (let index = 0; index < job.prompts.length; index += 1) {
       const imageUrls = [];
       for (let output = 1; output <= job.outputs; output += 1) {
         job.attempts[index] += 1;
+        const form = new FormData();
+        form.append("prompt", job.prompts[index]);
+        form.append("width", String(width));
+        form.append("height", String(height));
+        if (referenceImage) form.append("input_image_0", new Blob([referenceImage.data], { type: referenceImage.contentType }), "reference-image");
         const response = await fetch(`${cloudflareWorkerUrl}/generate`, {
           method: "POST",
-          headers: { authorization: `Bearer ${cloudflareWorkerToken}`, "content-type": "application/json" },
-          body: JSON.stringify({ prompt: job.prompts[index], width, height }),
+          headers: { authorization: `Bearer ${cloudflareWorkerToken}` },
+          body: form,
           signal: AbortSignal.timeout(cloudflareWorkerTimeoutMs)
         });
         if (!response.ok) {
@@ -841,11 +858,8 @@ const server = http.createServer(async (req, res) => {
         });
       }
       const referenceImageUrl = body.referenceImageUrl ? String(body.referenceImageUrl) : null;
-      if (provider === "cloudflare" && referenceImageUrl) {
-        return send(res, 400, { error: "Cloudflare provider hiện chỉ hỗ trợ text-to-image trong API này" });
-      }
       if (referenceImageUrl && !/^https?:\/\//i.test(referenceImageUrl)) return send(res, 400, { error: "referenceImageUrl phải là URL HTTP(S)" });
-      if (referenceImageUrl && worker !== "extension") return send(res, 400, { error: "Ảnh tham chiếu hiện chỉ hỗ trợ worker extension" });
+      if (referenceImageUrl && !new Set(["extension", "cloudflare"]).has(worker)) return send(res, 400, { error: "Ảnh tham chiếu chỉ hỗ trợ worker extension hoặc cloudflare" });
       if (referenceImageUrl && provider === "chatgpt") return send(res, 400, { error: "Ảnh tham chiếu ChatGPT chưa được hỗ trợ" });
       const delayMs = Math.max(5000, Number(body.delayMs || 15000));
       const timeoutMs = Math.max(30000, Number(body.timeoutMs || 180000));

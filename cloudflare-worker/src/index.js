@@ -1,6 +1,7 @@
 const DEFAULT_MODEL = "@cf/black-forest-labs/flux-2-klein-4b";
 const DIMENSION_MIN = 256;
 const DIMENSION_MAX = 1920;
+const MAX_REFERENCE_IMAGE_BYTES = 5 * 1024 * 1024;
 
 function json(payload, status = 200) {
   return Response.json(payload, { status, headers: { "cache-control": "no-store" } });
@@ -38,12 +39,25 @@ export function validateInput(body) {
     if (!Number.isSafeInteger(seed) || seed < 0) throw new Error("seed must be a non-negative integer");
     input.seed = seed;
   }
+  if (body.input_image_0 !== undefined) {
+    const image = body.input_image_0;
+    if (!(image instanceof Blob) || !image.type.startsWith("image/")) {
+      throw new Error("input_image_0 must be an image file");
+    }
+    if (!image.size || image.size > MAX_REFERENCE_IMAGE_BYTES) {
+      throw new Error("input_image_0 must be from 1 byte to 5 MB");
+    }
+    input.input_image_0 = image;
+  }
   return input;
 }
 
 function toMultipart(input) {
   const form = new FormData();
-  for (const [key, value] of Object.entries(input)) form.append(key, String(value));
+  for (const [key, value] of Object.entries(input)) {
+    if (value instanceof Blob) form.append(key, value, "reference-image");
+    else form.append(key, String(value));
+  }
   const serialized = new Response(form);
   return { body: serialized.body, contentType: serialized.headers.get("content-type") };
 }
@@ -66,7 +80,13 @@ export default {
 
     let input;
     try {
-      input = validateInput(await request.json());
+      const contentType = request.headers.get("content-type") || "";
+      if (contentType.startsWith("multipart/form-data")) {
+        const form = await request.formData();
+        input = validateInput(Object.fromEntries(form.entries()));
+      } else {
+        input = validateInput(await request.json());
+      }
     } catch (error) {
       return json({ error: error.message || "Invalid JSON body" }, 400);
     }

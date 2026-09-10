@@ -166,6 +166,8 @@ curl -sS -X POST http://127.0.0.1:8787/generate \
   --data '{"provider":"cloudflare","ratio":"1:1","outputs":1,"prompt":"A tiny robot painter, studio light"}'
 ```
 
+Để chỉnh sửa từ một ảnh có sẵn, upload JPEG/PNG/WebP bằng `POST /assets`, rồi thêm `"referenceImageUrl":"URL_NHAN_DUOC"` vào request Cloudflare. Ảnh tham chiếu Cloudflare tối đa 5 MB; trong prompt có thể gọi ảnh đó là `image 0`.
+
 ```bash
 export FLOW_CLIENT_KEY='replace-with-a-long-random-secret'
 
