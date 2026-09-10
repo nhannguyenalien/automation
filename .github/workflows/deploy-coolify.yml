@@ -24,6 +24,58 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: Configure Cloudflare image provider
+        env:
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          COOLIFY_API_URL: https://cool.toidayhoc.com/api/v1
+          COOLIFY_APPLICATION_UUID: zootqghsowlmcsbdziaawk0l
+          CLOUDFLARE_WORKER_URL: ${{ secrets.CLOUDFLARE_WORKER_URL }}
+          CLOUDFLARE_WORKER_TOKEN: ${{ secrets.CLOUDFLARE_WORKER_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          upsert_env() {
+            local key="$1"
+            local value="$2"
+            local payload
+            local status
+
+            payload="$(jq -cn --arg key "$key" --arg value "$value" \
+              '{key: $key, value: $value, is_preview: false, is_literal: true}')"
+
+            status="$(curl --silent --show-error --output /tmp/coolify-env-response.json \
+              --write-out '%{http_code}' \
+              --request POST \
+              --header "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
+              --header "Accept: application/json" \
+              --header "Content-Type: application/json" \
+              --data "$payload" \
+              "${COOLIFY_API_URL}/applications/${COOLIFY_APPLICATION_UUID}/envs")"
+
+            if [[ "$status" == "200" || "$status" == "201" ]]; then
+              return 0
+            fi
+
+            status="$(curl --silent --show-error --output /tmp/coolify-env-response.json \
+              --write-out '%{http_code}' \
+              --request PATCH \
+              --header "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
+              --header "Accept: application/json" \
+              --header "Content-Type: application/json" \
+              --data "$payload" \
+              "${COOLIFY_API_URL}/applications/${COOLIFY_APPLICATION_UUID}/envs")"
+
+            if [[ "$status" != "200" && "$status" != "201" ]]; then
+              echo "Could not configure ${key} (HTTP ${status})." >&2
+              exit 1
+            fi
+          }
+
+          test -n "$CLOUDFLARE_WORKER_URL"
+          test -n "$CLOUDFLARE_WORKER_TOKEN"
+          upsert_env CLOUDFLARE_WORKER_URL "$CLOUDFLARE_WORKER_URL"
+          upsert_env CLOUDFLARE_WORKER_TOKEN "$CLOUDFLARE_WORKER_TOKEN"
+
       - name: Trigger Coolify deployment
         env:
           COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
@@ -34,4 +86,4 @@ jobs:
             --request POST \
             --header "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
             --header "Accept: application/json" \
-            "${COOLIFY_API_URL}/deploy?uuid=${COOLIFY_APPLICATION_UUID}&force=false"
+            "${COOLIFY_API_URL}/deploy?uuid=${COOLIFY_APPLICATION_UUID}&force=true"
