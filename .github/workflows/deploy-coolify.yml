@@ -7,6 +7,8 @@ on:
     paths:
       - "flow_api.mjs"
       - "worker-routing.mjs"
+      - "cloudflare-quota.mjs"
+      - "Dockerfile.backend"
       - "docs/**"
       - "Dockerfile.backend"
       - "flow-extension/**"
