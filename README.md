@@ -154,7 +154,7 @@ Mọi client vẫn gọi một Base URL duy nhất. Mỗi máy Chrome đặt m�
 
 ### 4. Tạo một ảnh từ text
 
-Mặc định `/generate` dùng Google Flow (`provider: "flow"`). Gửi `provider: "cloudflare"` để chạy FLUX.2 Klein 4B trực tiếp qua Workers AI (không cần Chrome), hoặc `provider: "chatgpt"` để dùng phiên đăng nhập ChatGPT web.
+Mặc định `/generate` dùng Google Flow (`provider: "flow"`). Gửi `provider: "cloudflare"` để chạy FLUX.2 Klein 4B trực tiếp qua Workers AI (không cần Chrome), hoặc `provider: "chatgpt"` để dùng phiên đăng nhập ChatGPT web. Cloudflare FLUX dùng hạn mức chung toàn API là 80 ảnh mỗi ngày theo múi giờ `Asia/Ho_Chi_Minh`; request vượt hạn mức trả HTTP 429 với `errorCode: "cloudflare_daily_limit"`.
 
 Ví dụ Cloudflare FLUX.2 Klein 4B:
 

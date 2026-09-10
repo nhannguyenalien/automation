@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 import { CreateBucketCommand, HeadBucketCommand, PutBucketPolicyCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { applyChatProviderFallback, normalizeCapabilities, workerCanRun, workerRetryReady } from "./worker-routing.mjs";
+import { cloudflareDailyUsage, reserveCloudflareImages } from "./cloudflare-quota.mjs";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const runtimeDir = path.join(root, ".flow-api");
@@ -41,7 +42,7 @@ const inlineWaitByType = {
   video: inlineWaitSetting("FLOW_VIDEO_INLINE_WAIT_MS", 2000)
 };
 const defaultWorker = process.env.FLOW_WORKER || "playwright";
-const apiRelease = "2026-09-10-cloudflare-flux-klein-img2img-v2";
+const apiRelease = "2026-09-10-cloudflare-flux-daily-limit-v1";
 const githubRepository = process.env.FLOW_GITHUB_REPOSITORY || "nhannguyenalien/automation";
 const extensionDownloadUrl = `https://github.com/${githubRepository}/releases/latest/download/Google-AI-Browser-Worker.zip`;
 const extensionManifestPath = path.join(root, "flow-extension", "manifest.json");
@@ -176,6 +177,14 @@ await database.executeMultiple(`
     last_error TEXT
   );
   CREATE INDEX IF NOT EXISTS extension_workers_seen_idx ON extension_workers(last_seen_at);
+  CREATE TABLE IF NOT EXISTS cloudflare_daily_reservations (
+    job_id TEXT PRIMARY KEY,
+    quota_day TEXT NOT NULL,
+    images INTEGER NOT NULL CHECK(images > 0),
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS cloudflare_daily_reservations_day_idx
+    ON cloudflare_daily_reservations(quota_day);
 `);
 
 async function touchExtensionWorker({ workerId, machineId, version, enabled = true, capabilities }, executor = database) {
@@ -732,6 +741,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/health" && req.method === "GET") {
       const stats = await queueStats();
       const extensionWorkers = await extensionWorkerStats();
+      const cloudflareQuota = await cloudflareDailyUsage(database);
       return send(res, 200, {
         ok: true, release: apiRelease, running, queued: stats.queued, queue: stats,
         extensionWorkers: { allowedPrefixes: allowedExtensionWorkerPrefixes,
@@ -740,7 +750,7 @@ const server = http.createServer(async (req, res) => {
         database: { type: "turso", persistent: true, connected: true },
         storage: { configured: s3Configured, bucket: s3Configured ? s3Bucket : null },
         providers: {
-          cloudflare: { configured: cloudflareConfigured, model: "flux-2-klein-4b" }
+          cloudflare: { configured: cloudflareConfigured, model: "flux-2-klein-4b", quota: cloudflareQuota }
         }
       });
     }
@@ -901,6 +911,17 @@ const server = http.createServer(async (req, res) => {
         idempotencyKeyHash: identity?.keyHash || null,
         requestFingerprint: identity?.requestFingerprint || null
       };
+      if (provider === "cloudflare") {
+        const quota = await reserveCloudflareImages(database, id, requestedImages);
+        if (!quota.allowed) {
+          return send(res, 429, {
+            error: `Cloudflare FLUX đã dùng ${quota.used}/${quota.limit} ảnh ngày ${quota.day}; request cần ${quota.requested} ảnh nhưng chỉ còn ${quota.remaining}`,
+            errorCode: "cloudflare_daily_limit",
+            quota
+          });
+        }
+        job.cloudflareQuota = { day: quota.day, images: requestedImages };
+      }
       if (identity) {
         const created = await insertJobOnce(job);
         if (!created) {

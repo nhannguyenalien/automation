@@ -149,7 +149,7 @@
         "allOf": [
           { "$ref": "#/components/schemas/PromptInput" },
           { "type": "object", "properties": {
-            "provider": { "type": "string", "enum": ["flow", "chatgpt", "cloudflare"], "default": "flow", "description": "Cloudflare runs FLUX.2 Klein 4B without Chrome and accepts one referenceImageUrl. ChatGPT requires worker=extension, outputs=1, and no referenceImageUrl." },
+            "provider": { "type": "string", "enum": ["flow", "chatgpt", "cloudflare"], "default": "flow", "description": "Cloudflare runs FLUX.2 Klein 4B without Chrome and accepts one referenceImageUrl. It has a global limit of 80 images per Asia/Ho_Chi_Minh calendar day; excess requests return HTTP 429. ChatGPT requires worker=extension, outputs=1, and no referenceImageUrl." },
             "ratio": { "type": "string", "enum": ["16:9", "4:3", "1:1", "3:4", "9:16"], "default": "16:9" },
             "outputs": { "type": "integer", "minimum": 1, "maximum": 4, "default": 1 },
             "worker": { "type": "string", "enum": ["extension", "playwright"], "default": "extension" },

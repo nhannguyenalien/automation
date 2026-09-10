@@ -44,6 +44,7 @@ Batch: use prompts[]. Maximum 100 prompts per job. Default outputs is 1.
 Allowed ratios: 16:9, 4:3, 1:1, 3:4, 9:16.
 ChatGPT image currently requires extension, outputs=1, and no referenceImageUrl.
 Cloudflare uses Workers AI model FLUX.2 Klein 4B (response model: flux-2-klein-4b), needs no browser/extension, supports outputs=1..4 and one referenceImageUrl (JPEG/PNG/WebP, maximum 5 MB).
+Cloudflare FLUX has one global API-wide quota of 80 images per Asia/Ho_Chi_Minh calendar day. prompts.length * outputs is reserved when a job is accepted. Requests exceeding the remaining quota return HTTP 429 with errorCode cloudflare_daily_limit.
 Result: images[].
 
 ## Upload a reference image
