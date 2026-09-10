@@ -10,10 +10,10 @@
 </head>
 <body><div class="layout">
   <aside><div class="brand">Google AI Browser API</div><nav class="nav">
-    <a href="#start">Bắt đầu nhanh</a><a href="#extension">Tải extension</a><a href="#agent">Dành cho AI agent</a><a href="#chat">Chat Gemini/ChatGPT</a><a href="#text-image">Text to image</a><a href="#image-image">Image to image</a><a href="#video">Text/Image to video</a><a href="#video-to-video">Video to video</a><a href="#jobs">Theo dõi job</a><a href="#reference">Tham số</a><a href="#production">Vận hành</a>
+    <a href="#start">Bắt đầu nhanh</a><a href="#extension">Tải extension</a><a href="#agent">Dành cho AI agent</a><a href="#chat">Chat Gemini/ChatGPT</a><a href="#text-image">Text to image</a><a href="#cloudflare-image">Cloudflare FLUX.2</a><a href="#image-image">Image to image</a><a href="#video">Text/Image to video</a><a href="#video-to-video">Video to video</a><a href="#jobs">Theo dõi job</a><a href="#reference">Tham số</a><a href="#production">Vận hành</a>
   </nav></aside>
   <main>
-    <section class="hero"><div class="badge"><span class="dot" id="healthDot"></span><span id="healthText">Đang kiểm tra API…</span></div><h1>API cho Gemini Chat và Google Flow</h1><p>Một contract chung cho chat, ảnh và video: xong nhanh trả dữ liệu ngay; chạy lâu trả ID để client lấy kết quả sau.</p><div class="base"><strong>Base URL</strong><code id="baseUrl"></code><button class="copy" data-copy="#baseUrl">Sao chép</button></div></section>
+    <section class="hero"><div class="badge"><span class="dot" id="healthDot"></span><span id="healthText">Đang kiểm tra API…</span></div><h1>API cho Gemini, Google Flow và Cloudflare FLUX</h1><p>Một contract chung cho chat, ảnh và video: xong nhanh trả dữ liệu ngay; chạy lâu trả ID để client lấy kết quả sau.</p><div class="base"><strong>Base URL</strong><code id="baseUrl"></code><button class="copy" data-copy="#baseUrl">Sao chép</button></div></section>
 
     <h2 id="start">Bắt đầu nhanh</h2>
     <div class="card"><div class="endpoint"><span class="method get">GET</span><code>/health</code></div><pre><code>curl "$BASE_URL/health"</code></pre></div>
@@ -51,6 +51,24 @@ Human docs:   $BASE_URL/docs</code></pre></div>
     "outputs": 1,
     "worker": "extension"
   }'</code></pre><p>Mặc định dùng <code>provider: "flow"</code>. Để tạo ảnh bằng phiên đăng nhập ChatGPT web, gửi <code>{"provider":"chatgpt","worker":"extension","outputs":1,"prompt":"..."}</code>. ChatGPT hiện chưa hỗ trợ ảnh tham chiếu. Một prompt mặc định tạo đúng một ảnh; giữ nguyên <code>Idempotency-Key</code> khi retry cùng yêu cầu và sau khi nhận <code>id</code> chỉ dùng <code>GET /jobs/:id</code> để theo dõi.</p></div>
+
+    <h2 id="cloudflare-image">Cloudflare FLUX.2 Klein 4B</h2>
+    <div class="card"><p>Dùng <code>provider: "cloudflare"</code> để tạo ảnh trực tiếp bằng Workers AI model <code>FLUX.2 Klein 4B</code>. Provider này không cần Chrome hoặc extension, hỗ trợ tỉ lệ ảnh và <code>outputs: 1..4</code>, nhưng không nhận <code>referenceImageUrl</code>.</p><div class="endpoint"><span class="method">POST</span><code>/generate</code></div><pre><code>curl -X POST "$BASE_URL/generate" \
+  -H "Authorization: Bearer $FLOW_CLIENT_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: flux-klein-UNIQUE_ID" \
+  -d '{
+    "provider": "cloudflare",
+    "prompt": "Một robot nhỏ màu cam đang vẽ hoa sen phát sáng",
+    "ratio": "1:1",
+    "outputs": 1
+  }'</code></pre><p>Response có <code>provider: "cloudflare"</code> và <code>model: "flux-2-klein-4b"</code>. Nếu nhận HTTP <code>202</code>, lấy <code>id</code> và gọi <code>GET /jobs/:id</code>; khi <code>status</code> là <code>completed</code>, URL JPEG public nằm trong <code>images[]</code>.</p><pre><code>{
+  "id": "idem-image-…",
+  "status": "completed",
+  "provider": "cloudflare",
+  "model": "flux-2-klein-4b",
+  "images": ["https://s3a.schoolsai.work/flow-images/jobs/…/001-01-….jpg"]
+}</code></pre></div>
 
     <h2 id="image-image">Image to image</h2><p>Upload ảnh gốc trước, sau đó dùng URL nhận được làm <code>referenceImageUrl</code>.</p>
     <div class="steps"><div><h3>Upload ảnh tham chiếu</h3><pre><code>curl -X POST "$BASE_URL/assets" \
@@ -113,7 +131,7 @@ Human docs:   $BASE_URL/docs</code></pre></div>
   "progress": 2,
   "total": 2,
   "images": ["https://s3a.schoolsai.work/…"]
-}</code></pre><h3>Ví dụ JavaScript: tạo job và chờ kết quả</h3><pre><code>const API_BASE_URL = "https://nhans-macbook-pro-1.tail5d608a.ts.net";
+}</code></pre><h3>Ví dụ JavaScript: tạo job và chờ kết quả</h3><pre><code>const API_BASE_URL = "https://image-ai.toidayhoc.com";
 const FLOW_CLIENT_KEY = "YOUR_CLIENT_KEY";
 
 async function generateAndWait(prompt) {
