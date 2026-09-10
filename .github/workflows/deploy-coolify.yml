@@ -45,7 +45,7 @@ jobs:
 
             status="$(curl --silent --show-error --output /tmp/coolify-env-response.json \
               --write-out '%{http_code}' \
-              --request POST \
+              --request PATCH \
               --header "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
               --header "Accept: application/json" \
               --header "Content-Type: application/json" \
@@ -58,7 +58,7 @@ jobs:
 
             status="$(curl --silent --show-error --output /tmp/coolify-env-response.json \
               --write-out '%{http_code}' \
-              --request PATCH \
+              --request POST \
               --header "Authorization: Bearer ${COOLIFY_API_TOKEN}" \
               --header "Accept: application/json" \
               --header "Content-Type: application/json" \
